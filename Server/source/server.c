@@ -78,8 +78,8 @@ void handle_service(int client_fd, char *service)
             while (!hash_table_insert(registered_table, username, password, 0))
             {
             }
-            pthread_mutex_unlock(&registered_table_mutex);
             send_data(client_fd, "OK_SIGNEDUP\r\n");
+            pthread_mutex_unlock(&registered_table_mutex);
         }
     }
     else if (!strcmp(service_type, "LOGOUT"))
@@ -107,8 +107,8 @@ void handle_service(int client_fd, char *service)
         hash_node_t *logged_in_user = (hash_node_t *)hash_table_search(curr_login_table, username);
         if (!logged_in_user)
         {
-            pthread_mutex_unlock(&curr_login_table_mutex);
             send_data(client_fd, "ERR 104\r\n");
+            pthread_mutex_unlock(&curr_login_table_mutex);
             return;
         }
 
@@ -117,6 +117,7 @@ void handle_service(int client_fd, char *service)
         }
 
         send_data(client_fd, "OK_LOGGEDOUT\r\n");
+        pthread_mutex_unlock(&curr_login_table_mutex);
     }
     else if (!strcmp(service_type, "LOGIN"))
     {
@@ -154,35 +155,38 @@ void handle_service(int client_fd, char *service)
             return;
         }
 
+        pthread_mutex_lock(&registered_table_mutex);
         hash_node_t *registered_user = (hash_node_t *)hash_table_search(registered_table, username);
         if (!registered_user)
         {
             send_data(client_fd, "ERR 100\r\n");
+            pthread_mutex_unlock(&registered_table_mutex);
             return;
         }
+        pthread_mutex_unlock(&registered_table_mutex);
 
         pthread_mutex_lock(&curr_login_table_mutex);
         hash_node_t *logged_in_user = (hash_node_t *)hash_table_search(curr_login_table, username);
         if (logged_in_user)
         {
-            pthread_mutex_unlock(&curr_login_table_mutex);
             send_data(client_fd, "ERR 101\r\n");
+            pthread_mutex_unlock(&curr_login_table_mutex);
             return;
         }
 
         if (strcmp(registered_user->password, password) != 0)
         {
-            pthread_mutex_unlock(&curr_login_table_mutex);
             send_data(client_fd, "ERR 102\r\n");
+            pthread_mutex_unlock(&curr_login_table_mutex);
             return;
         }
 
         while (!hash_table_insert(curr_login_table, username, password, client_fd))
         {
         }
-        pthread_mutex_unlock(&curr_login_table_mutex);
 
         send_data(client_fd, "OK_LOGGEDIN\r\n");
+        pthread_mutex_unlock(&curr_login_table_mutex);
     }
     else
     {
@@ -192,7 +196,7 @@ void handle_service(int client_fd, char *service)
 
 void *thread_function(void *arg)
 {
-    (int *)arg; 
+    (int *)arg;
     while (true)
     {
         pthread_mutex_lock(&service_queue_mutex);
@@ -207,7 +211,9 @@ void *thread_function(void *arg)
         dequeue(service_queue);
         pthread_mutex_unlock(&service_queue_mutex);
 
+        pthread_mutex_lock(&usermutex[client_fd]);
         handle_service(client_fd, service);
+        pthread_mutex_unlock(&usermutex[client_fd]);
         free(service);
     }
 

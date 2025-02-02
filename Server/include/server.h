@@ -3,12 +3,14 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <ctype.h>
 
 #include "network.h"
 #include "queue.h"
 #include "hash_table.h"
+#include "mutex_table.h"
 
 #define CHAT_PORT "4040"
 #define LISTEN_BUF_LEN (100)
@@ -23,6 +25,7 @@
 static hash_table_t *curr_login_table;
 static hash_table_t *registered_table;
 static queue_t *service_queue;
+static mutex_table_t *mutex_table;
 
 static pthread_t thread_pool[THREAD_POOL_SIZE];
 
