@@ -40,6 +40,18 @@ static pthread_t thread_pool[THREAD_POOL_SIZE];
 static pthread_mutex_t curr_login_table_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t registered_table_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+void send_data(int client_fd, char *buffer);
+void handle_service(int client_fd, char *service);
+void *thread_function(void *arg);
+void make_socket_nonblocking(int sockfd);
+void print_getaddrinfo(struct addrinfo *servinfo);
+void cleanup_client_connection(int epoll_fd, int client_fd);
+int process_client_data(int client_fd, char *buffer, ssize_t bytes_read, size_t thread_index);
+int handle_client_data(int epoll_fd, struct epoll_event *event);
+int handle_new_connection(int epoll_fd, int server_fd);
+int server_event_loop(int epoll_fd, int server_fd);
+void cleanup_thread_data(size_t count);
+
 /*
 
 Service format
