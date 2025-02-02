@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <fcntl.h>
+#include <stdio.h>
 
 #include "network.h"
 
@@ -9,10 +11,20 @@
 #define LISTEN_BUF_LEN (100)
 
 #define THREAD_POOL_SIZE (16)
+#define MAX_EVENTS (500)
 
 pthread_t thread_pool[THREAD_POOL_SIZE];
 
-void *thread_function(void *arg);
+void *thread_function(void *arg)
+{
+    return NULL;
+}
+
+void make_socket_nonblocking(int sockfd)
+{
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+}
 
 void print_getaddrinfo(struct addrinfo *servinfo)
 {
@@ -83,6 +95,8 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    make_socket_nonblocking(server_fd);
+
     int yes = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1)
     {
@@ -100,18 +114,66 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    freeaddrinfo(server);
+
     if ((listen(server_fd, LISTEN_BUF_LEN)) == -1)
     {
         close(server_fd);
-        freeaddrinfo(server);
         perror("listen");
         exit(EXIT_FAILURE);
     }
 
+    int epoll_fd = epoll_create1(0);
+    if (epoll_fd == -1)
+    {
+        perror("epoll_create1");
+        close(server_fd);
+        exit(EXIT_FAILURE);
+    }
+
+    struct epoll_event event, events[MAX_EVENTS];
+    event.events = EPOLLIN;
+    event.data.fd = server_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event);
+
+    int client_fd;
+
     while (true)
     {
+        int num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        for (int counter = 0; counter < num_events; counter++)
+        {
+            if (events[counter].data.fd == server_fd)
+            {
+                // new incoming connection
+                client_fd = accept(server_fd, NULL, NULL);
+                if (client_fd >= 0)
+                {
+                    make_socket_nonblocking(client_fd);
+                    event.events = EPOLLIN | EPOLLET;
+                    event.data.fd = client_fd;
+                    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event);
+                    printf("new client added\n");
+                }
+                else
+                {
+                    close(server_fd);
+                    close(epoll_fd);
+                    perror("accept");
+                    exit(EXIT_FAILURE);
+                }
+            }
+            else
+            {
+                char buffer[1024];
+                int bytes_read = recv(events[counter].data.fd, buffer, sizeof(buffer), 0);
+                buffer[bytes_read] = '\0';
+                printf("Data received: %s\n", buffer);
+            }
+        }
     }
 
     close(server_fd);
+    close(epoll_fd);
     return EXIT_SUCCESS;
 }

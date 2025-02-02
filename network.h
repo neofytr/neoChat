@@ -15,5 +15,6 @@ Common includes for network programming
 #include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <sys/epoll.h>
 
 #endif 
