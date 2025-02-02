@@ -14,10 +14,11 @@ struct node_
 {
     int client_fd;
     node_t *next_node;
+    char *service;
 };
 
 queue_t *create_queue();
-int enqueue(int client_fd, queue_t *queue);
+int enqueue(int client_fd, char *service, queue_t *queue);
 int dequeue(queue_t *queue);
 int is_empty(queue_t *queue);
 void clear_queue(queue_t *queue);

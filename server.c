@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #include "network.h"
+#include "queue.h"
 #include "hash_table.h"
 
 #define CHAT_PORT "4040"
@@ -17,6 +18,8 @@
 #define MAX_EVENTS (500)
 
 pthread_t thread_pool[THREAD_POOL_SIZE];
+pthread_mutex_t service_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t service_queue_cond = PTHREAD_COND_INITIALIZER;
 
 void *thread_function(void *arg)
 {
@@ -154,6 +157,15 @@ int main(int argc, char **argv)
 
     int client_fd;
 
+    queue_t *service_queue = create_queue();
+    if (!service_queue)
+    {
+        close(epoll_fd);
+        perror("malloc");
+        close(server_fd);
+        destroy_hash_table(userpass_table);
+    }
+
     while (true)
     {
         int num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
@@ -173,6 +185,7 @@ int main(int argc, char **argv)
                 }
                 else
                 {
+                    destroy_queue(service_queue);
                     destroy_hash_table(userpass_table);
                     close(server_fd);
                     close(epoll_fd);
@@ -185,6 +198,7 @@ int main(int argc, char **argv)
                 char *buffer = (char *)malloc(MAX_DATA_LEN * sizeof(char));
                 if (!buffer)
                 {
+                    destroy_queue(service_queue);
                     destroy_hash_table(userpass_table);
                     close(server_fd);
                     close(epoll_fd);
@@ -196,11 +210,22 @@ int main(int argc, char **argv)
 
                 if (bytes_read == 0)
                 {
+                    // client closed connection; a recv with zero will occur in this case and only in this case
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[counter].data.fd, NULL);
                     close(events[counter].data.fd);
                 }
                 else
                 {
+                    pthread_mutex_lock(&service_queue_mutex);
+                    if (enqueue(events[counter].data.fd, service_queue) == -1)
+                    {
+                        destroy_queue(service_queue);
+                        destroy_hash_table(userpass_table);
+                        close(server_fd);
+                        close(epoll_fd);
+                        perror("malloc");
+                        exit(EXIT_FAILURE);
+                    }
                 }
             }
         }
@@ -208,6 +233,7 @@ int main(int argc, char **argv)
 
     close(server_fd);
     close(epoll_fd);
+    destroy_queue(service_queue);
     destroy_hash_table(userpass_table);
     return EXIT_SUCCESS;
 }

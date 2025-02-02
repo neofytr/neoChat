@@ -14,7 +14,7 @@ queue_t *create_queue()
     return new_queue;
 }
 
-int enqueue(int client_fd, queue_t *queue)
+int enqueue(int client_fd, char *service, queue_t *queue)
 {
     if (!queue)
     {
@@ -28,6 +28,7 @@ int enqueue(int client_fd, queue_t *queue)
     }
 
     new_node->client_fd = client_fd;
+    new_node->service = service;
     new_node->next_node = NULL;
 
     if (!queue->front)
