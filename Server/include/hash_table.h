@@ -28,6 +28,7 @@ void destroy_hash_table(hash_table_t *table);
 bool hash_table_insert(hash_table_t *table, const char *username, const char *password, int user_fd);
 hash_node_t *hash_table_search(hash_table_t *table, const char *username);
 bool hash_table_delete(hash_table_t *table, const char *username);
+bool hash_table_delete_via_id(hash_table_t *table, int user_fd);
 void hash_table_clear(hash_table_t *table);
 size_t hash_table_size(hash_table_t *table);
 void hash_table_print_stats(hash_table_t *table);
@@ -161,6 +162,44 @@ bool hash_table_delete(hash_table_t *table, const char *username)
 
         prev = current;
         current = current->next_node;
+    }
+
+    return false;
+}
+
+bool hash_table_delete_via_id(hash_table_t *table, int user_fd)
+{
+    if (!table)
+    {
+        return false;
+    }
+
+    for (size_t i = 0; i < NUM_BUCKETS; i++)
+    {
+        hash_node_t *current = table->buckets[i];
+        hash_node_t *prev = NULL;
+
+        while (current)
+        {
+            if (current->user_fd == user_fd)
+            {
+                if (prev)
+                {
+                    prev->next_node = current->next_node;
+                }
+                else
+                {
+                    table->buckets[i] = current->next_node;
+                }
+
+                free(current);
+                table->total_entries--;
+                return true;
+            }
+
+            prev = current;
+            current = current->next_node;
+        }
     }
 
     return false;

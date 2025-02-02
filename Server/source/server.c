@@ -316,7 +316,7 @@ void print_getaddrinfo(struct addrinfo *servinfo)
     }
 }
 
-/* void cleanup_client_connection(int epoll_fd, int client_fd)
+void cleanup_client_connection(int epoll_fd, int client_fd)
 {
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
     close(client_fd);
@@ -324,7 +324,7 @@ void print_getaddrinfo(struct addrinfo *servinfo)
     pthread_mutex_lock(&curr_login_table_mutex);
     hash_table_delete_via_id(curr_login_table, client_fd);
     pthread_mutex_unlock(&curr_login_table_mutex);
-} */
+} 
 
 int process_client_data(int client_fd, char *buffer, ssize_t bytes_read, size_t thread_index)
 {
