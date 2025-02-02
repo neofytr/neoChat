@@ -132,7 +132,7 @@ void handle_service(int client_fd, char *service)
             return;
         }
 
-        node_t *searched_node = (node_t *)hash_table_search(registered_table, username);
+        hash_node_t *searched_node = (hash_node_t *)hash_table_search(registered_table, username);
         if (searched_node)
         {
             send_data(client_fd, "ERR 103");
@@ -149,6 +149,69 @@ void handle_service(int client_fd, char *service)
     }
     else if (!strcmp(service_type, "LOGIN"))
     {
+#define MAX_USERNAME_LEN 256
+#define MAX_PASS_LEN 256
+        char username[MAX_USERNAME_LEN];
+        char password[MAX_PASS_LEN];
+#undef MAX_USERNAME_LEN
+#undef MAX_PASS_LEN
+
+        size_t username_len = 0;
+        size_t current_pos = service_len + 1;
+
+        while (current_pos < len && !isspace(service[current_pos]) && username_len < sizeof(username) - 1)
+        {
+            username[username_len++] = service[current_pos++];
+        }
+        username[username_len] = '\0';
+
+        if (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
+
+        size_t password_len = 0;
+        while (current_pos < len && !isspace(service[current_pos]) && password_len < sizeof(password) - 1)
+        {
+            password[password_len++] = service[current_pos++];
+        }
+        password[password_len] = '\0';
+
+        if (username_len == 0 || password_len == 0)
+        {
+            send_data(client_fd, "ERR 99");
+            return;
+        }
+
+        hash_node_t *registered_user = (hash_node_t *)hash_table_search(registered_table, username);
+        if (!registered_user)
+        {
+            send_data(client_fd, "ERR 100");
+            return;
+        }
+
+        pthread_mutex_lock(&curr_login_table_mutex);
+        hash_node_t *logged_in_user = (hash_node_t *)hash_table_search(curr_login_table, username);
+        if (logged_in_user)
+        {
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 101");
+            return;
+        }
+
+        if (strcmp(registered_user->password, password) != 0)
+        {
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 102");
+            return;
+        }
+
+        while (!hash_table_insert(curr_login_table, username, password, client_fd))
+        {
+        }
+        pthread_mutex_unlock(&curr_login_table_mutex);
+
+        send_data(client_fd, "OK_LOGGEDIN");
     }
     else
     {
@@ -351,7 +414,6 @@ int main(int argc, char **argv)
                     event.events = EPOLLIN | EPOLLET;
                     event.data.fd = client_fd;
                     epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event);
-                    printf("new client added\n");
                 }
                 else
                 {
@@ -377,6 +439,7 @@ int main(int argc, char **argv)
                     destroy_hash_table(registered_table);
                     exit(EXIT_FAILURE);
                 }
+
                 int bytes_read = recv(events[counter].data.fd, buffer, MAX_DATA_LEN - 1, 0);
                 buffer[bytes_read] = '\0';
 
@@ -385,23 +448,94 @@ int main(int argc, char **argv)
                     // client closed connection; a recv with zero will occur in this case and only in this case
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[counter].data.fd, NULL);
                     close(events[counter].data.fd);
+                    free(buffer);
                 }
                 else
                 {
+                    char *current_pos = buffer;
+                    char *next_delim;
+
                     pthread_mutex_lock(&service_queue_mutex);
-                    if (enqueue(events[counter].data.fd, buffer, service_queue) == -1)
+
+                    while ((next_delim = strstr(current_pos, "\r\n")) != NULL)
                     {
-                        destroy_queue(service_queue);
-                        destroy_hash_table(curr_login_table);
-                        free(buffer);
-                        close(server_fd);
-                        close(epoll_fd);
-                        perror("malloc");
-                        destroy_hash_table(registered_table);
-                        exit(EXIT_FAILURE);
+                        size_t service_len = next_delim - current_pos;
+                        char *service = (char *)malloc((service_len + 1) * sizeof(char));
+
+                        if (!service)
+                        {
+                            pthread_mutex_unlock(&service_queue_mutex);
+                            destroy_queue(service_queue);
+                            destroy_hash_table(curr_login_table);
+                            free(buffer);
+                            close(server_fd);
+                            close(epoll_fd);
+                            perror("malloc");
+                            destroy_hash_table(registered_table);
+                            exit(EXIT_FAILURE);
+                        }
+
+                        strncpy(service, current_pos, service_len);
+                        service[service_len] = '\0';
+
+                        if (enqueue(events[counter].data.fd, service, service_queue) == -1)
+                        {
+                            pthread_mutex_unlock(&service_queue_mutex);
+                            destroy_queue(service_queue);
+                            destroy_hash_table(curr_login_table);
+                            free(service);
+                            free(buffer);
+                            close(server_fd);
+                            close(epoll_fd);
+                            perror("malloc");
+                            destroy_hash_table(registered_table);
+                            exit(EXIT_FAILURE);
+                        }
+
+                        pthread_cond_signal(&service_queue_cond);
+                        current_pos = next_delim + 2; // Skip past \r\n
                     }
-                    pthread_cond_signal(&service_queue_cond);
+
+                    // Handle any remaining data that doesn't end with \r\n
+                    if (*current_pos != '\0')
+                    {
+                        size_t service_len = strlen(current_pos);
+                        char *service = (char *)malloc((service_len + 1) * sizeof(char));
+
+                        if (!service)
+                        {
+                            pthread_mutex_unlock(&service_queue_mutex);
+                            destroy_queue(service_queue);
+                            destroy_hash_table(curr_login_table);
+                            free(buffer);
+                            close(server_fd);
+                            close(epoll_fd);
+                            perror("malloc");
+                            destroy_hash_table(registered_table);
+                            exit(EXIT_FAILURE);
+                        }
+
+                        strcpy(service, current_pos);
+
+                        if (enqueue(events[counter].data.fd, service, service_queue) == -1)
+                        {
+                            pthread_mutex_unlock(&service_queue_mutex);
+                            destroy_queue(service_queue);
+                            destroy_hash_table(curr_login_table);
+                            free(service);
+                            free(buffer);
+                            close(server_fd);
+                            close(epoll_fd);
+                            perror("malloc");
+                            destroy_hash_table(registered_table);
+                            exit(EXIT_FAILURE);
+                        }
+
+                        pthread_cond_signal(&service_queue_cond);
+                    }
+
                     pthread_mutex_unlock(&service_queue_mutex);
+                    free(buffer);
                 }
             }
         }

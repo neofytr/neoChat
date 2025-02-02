@@ -92,10 +92,10 @@ bool hash_table_insert(hash_table_t *table, const char *username, const char *pa
     }
 
     strncpy(new_node->username, username, MAX_USERNAME_LEN - 1);
-    new_node->username[strlen(username) - 1] = '\0';
+    new_node->username[strlen(username)] = '\0';
 
     strncpy(new_node->password, password, MAX_PASS_LEN - 1);
-    new_node->username[strlen(password) - 1] = '\0';
+    new_node->username[strlen(password)] = '\0';
 
     new_node->user_fd = user_fd;
 
