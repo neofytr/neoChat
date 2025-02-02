@@ -1,6 +1,6 @@
 #include <stdlib.h>
 
-#include "queue.h"
+#include "../include/queue.h"
 
 queue_t *create_queue()
 {
