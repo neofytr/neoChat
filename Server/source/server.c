@@ -254,28 +254,27 @@ void handle_service(int client_fd, char *service)
 
 void *thread_function(void *arg)
 {
-    (int *)arg;
+    int index = (int)arg;
+
     while (true)
     {
-        pthread_mutex_lock(&service_queue_mutex);
-        while (is_empty(service_queue))
+        pthread_mutex_lock(&thread_data_arr[index].mutex);
+        while (is_empty(thread_data_arr[index].queue))
         {
-            pthread_cond_wait(&service_queue_cond, &service_queue_mutex);
+            pthread_cond_wait(&thread_data_arr[index].cond, &thread_data_arr[index].mutex);
         }
 
-        node_t *service_node = peek(service_queue);
+        node_t *service_node = peek(thread_data_arr[index].queue);
         char *service = service_node->service;
         int client_fd = service_node->client_fd;
-        dequeue(service_queue);
-        pthread_mutex_unlock(&service_queue_mutex);
+        dequeue(thread_data_arr[index].queue);
 
-        mutex_node_t *user_mutex_node = mutex_table_search(mutex_table, client_fd);
-        pthread_mutex_lock(&user_mutex_node->user_mutex);
         handle_service(client_fd, service);
-        pthread_mutex_unlock(&user_mutex_node->user_mutex);
+        pthread_mutex_unlock(&thread_data_arr[index].mutex);
         free(service);
     }
 
+    destroy_queue(thread_data_arr[index].queue);
     return NULL;
 }
 
@@ -317,72 +316,282 @@ void print_getaddrinfo(struct addrinfo *servinfo)
     }
 }
 
+/* void cleanup_client_connection(int epoll_fd, int client_fd)
+{
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+    close(client_fd);
+
+    pthread_mutex_lock(&curr_login_table_mutex);
+    hash_table_delete_via_id(curr_login_table, client_fd);
+    pthread_mutex_unlock(&curr_login_table_mutex);
+} */
+
+int process_client_data(int client_fd, char *buffer, ssize_t bytes_read, size_t thread_index)
+{
+    buffer[bytes_read] = '\0';
+    char *current_pos = buffer;
+    char *next_delim;
+
+    pthread_mutex_lock(&thread_data_arr[thread_index].mutex);
+
+    while ((next_delim = strstr(current_pos, "\r\n")) != NULL)
+    {
+        size_t message_len = next_delim - current_pos;
+        char *message = malloc(message_len + 1);
+
+        if (!message)
+        {
+            pthread_mutex_unlock(&thread_data_arr[thread_index].mutex);
+            return -1;
+        }
+
+        memcpy(message, current_pos, message_len);
+        message[message_len] = '\0';
+
+        if (enqueue(client_fd, message, thread_data_arr[thread_index].queue) == -1)
+        {
+            free(message);
+            pthread_mutex_unlock(&thread_data_arr[thread_index].mutex);
+            return -1;
+        }
+
+        current_pos = next_delim + 2; // Skip \r\n
+    }
+
+    if (*current_pos != '\0')
+    {
+        size_t remaining_len = strlen(current_pos);
+        char *message = malloc(remaining_len + 1);
+
+        if (!message)
+        {
+            pthread_mutex_unlock(&thread_data_arr[thread_index].mutex);
+            return -1;
+        }
+
+        strcpy(message, current_pos);
+
+        if (enqueue(client_fd, message, thread_data_arr[thread_index].queue) == -1)
+        {
+            free(message);
+            pthread_mutex_unlock(&thread_data_arr[thread_index].mutex);
+            return -1;
+        }
+    }
+
+    pthread_cond_signal(&thread_data_arr[thread_index].cond);
+    pthread_mutex_unlock(&thread_data_arr[thread_index].mutex);
+
+    return 0;
+}
+
+int handle_client_data(int epoll_fd, struct epoll_event *event)
+{
+    char read_buffer[MAX_DATA_LEN];
+    int client_fd = event->data.fd;
+    size_t thread_index = client_fd & (THREAD_POOL_SIZE - 1);
+
+    while (true)
+    {
+        ssize_t bytes_read = read(client_fd, read_buffer, sizeof(read_buffer) - 1);
+
+        if (bytes_read == -1)
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                break;
+            }
+            perror("read");
+            // cleanup_client_connection(epoll_fd, client_fd);
+            return -1;
+        }
+
+        if (bytes_read == 0)
+        {
+            // cleanup_client_connection(epoll_fd, client_fd);
+            return 0;
+        }
+
+        if (process_client_data(client_fd, read_buffer, bytes_read, thread_index) != 0)
+        {
+            // cleanup_client_connection(epoll_fd, client_fd);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int handle_new_connection(int epoll_fd, int server_fd)
+{
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    while (true)
+    {
+        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+        if (client_fd == -1)
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                break;
+            }
+            perror("accept");
+            return -1;
+        }
+
+        make_socket_nonblocking(client_fd);
+
+        struct epoll_event event = {
+            .events = EPOLLIN | EPOLLET,
+            .data.fd = client_fd,
+        };
+
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1)
+        {
+            perror("epoll_ctl");
+            close(client_fd);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int server_event_loop(int epoll_fd, int server_fd)
+{
+    struct epoll_event events[MAX_EVENTS];
+
+    while (true)
+    {
+        int num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        if (num_events == -1)
+        {
+            if (errno == EINTR)
+                continue;
+            perror("epoll_wait");
+            return EXIT_FAILURE;
+        }
+
+        for (int i = 0; i < num_events; i++)
+        {
+            if (events[i].data.fd == server_fd)
+            {
+                if (handle_new_connection(epoll_fd, server_fd) != 0)
+                {
+                    return EXIT_FAILURE;
+                }
+            }
+            else
+            {
+                if (handle_client_data(epoll_fd, &events[i]) != 0)
+                {
+                    return EXIT_FAILURE;
+                }
+            }
+        }
+    }
+
+    return EXIT_SUCCESS;
+}
+
+void cleanup_thread_data(size_t count)
+{
+    for (size_t i = 0; i < count; i++)
+    {
+        pthread_mutex_destroy(&thread_data_arr[i].mutex);
+        pthread_cond_destroy(&thread_data_arr[i].cond);
+        if (thread_data_arr[i].queue)
+        {
+            destroy_queue(thread_data_arr[i].queue);
+        }
+    }
+}
+
 int main()
 {
-    struct addrinfo hints, *server;
+    struct addrinfo hints, *server = NULL;
+    int server_fd = -1, epoll_fd = -1;
+    bool threads_initialized = false;
+    int ret = EXIT_FAILURE;
+
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0)
+    {
+        perror("pthread_attr_init");
+        goto cleanup;
+    }
+
+    if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED) != 0)
+    {
+        perror("pthread_attr_setdetachstate");
+        pthread_attr_destroy(&attr);
+        goto cleanup;
+    }
+
+    for (size_t i = 0; i < THREAD_POOL_SIZE; i++)
+    {
+        if (pthread_mutex_init(&thread_data_arr[i].mutex, NULL) != 0)
+        {
+            perror("pthread_mutex_init");
+            cleanup_thread_data(i);
+            pthread_attr_destroy(&attr);
+            goto cleanup;
+        }
+        if (pthread_cond_init(&thread_data_arr[i].cond, NULL) != 0)
+        {
+            perror("pthread_cond_init");
+            cleanup_thread_data(i);
+            pthread_attr_destroy(&attr);
+            goto cleanup;
+        }
+        thread_data_arr[i].queue = create_queue();
+        if (!thread_data_arr[i].queue)
+        {
+            perror("create_queue");
+            cleanup_thread_data(i);
+            pthread_attr_destroy(&attr);
+            goto cleanup;
+        }
+    }
+
+    for (size_t i = 0; i < THREAD_POOL_SIZE; i++)
+    {
+        if (pthread_create(&thread_pool[i], &attr, thread_function, (void *)i) != 0)
+        {
+            perror("pthread_create");
+            cleanup_thread_data(THREAD_POOL_SIZE);
+            pthread_attr_destroy(&attr);
+            goto cleanup;
+        }
+    }
+
+    threads_initialized = true;
+    pthread_attr_destroy(&attr);
+
+    if (!(curr_login_table = create_hash_table()) ||
+        !(registered_table = create_hash_table()))
+    {
+        perror("create_hash_table");
+        goto cleanup;
+    }
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    pthread_attr_t attr;
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-
-    for (size_t counter = 0; counter < THREAD_POOL_SIZE; counter++)
+    if (getaddrinfo(NULL, CHAT_PORT, &hints, &server) != 0)
     {
-        if (pthread_create(&thread_pool[counter], &attr, thread_function, NULL))
-        {
-            pthread_attr_destroy(&attr);
-            perror("pthread_create");
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    pthread_attr_destroy(&attr);
-
-    curr_login_table = create_hash_table();
-    if (!curr_login_table)
-    {
-        perror("malloc");
-        exit(EXIT_FAILURE);
-    }
-
-    mutex_table = create_mutex_table();
-    if (!mutex_table)
-    {
-        destroy_hash_table(curr_login_table);
-        perror("malloc");
-        exit(EXIT_FAILURE);
-    }
-
-    registered_table = create_hash_table();
-    if (!registered_table)
-    {
-        destroy_mutex_table(mutex_table);
-        destroy_hash_table(curr_login_table);
-        perror("malloc");
-        exit(EXIT_FAILURE);
-    }
-
-    if (getaddrinfo(NULL, CHAT_PORT, &hints, &server))
-    {
-        destroy_mutex_table(mutex_table);
-        destroy_hash_table(curr_login_table);
-        destroy_hash_table(registered_table);
         perror("getaddrinfo");
-        exit(EXIT_FAILURE);
+        goto cleanup;
     }
 
-    int server_fd = socket(server->ai_family, server->ai_socktype, server->ai_protocol);
+    server_fd = socket(server->ai_family, server->ai_socktype, server->ai_protocol);
     if (server_fd == -1)
     {
-        destroy_mutex_table(mutex_table);
-        destroy_hash_table(curr_login_table);
-        destroy_hash_table(registered_table);
-        freeaddrinfo(server);
         perror("socket");
-        exit(EXIT_FAILURE);
+        goto cleanup;
     }
 
     make_socket_nonblocking(server_fd);
@@ -390,225 +599,55 @@ int main()
     int yes = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1)
     {
-        destroy_mutex_table(mutex_table);
-        destroy_hash_table(curr_login_table);
-        destroy_hash_table(registered_table);
         perror("setsockopt");
-        close(server_fd);
-        freeaddrinfo(server);
-        exit(EXIT_FAILURE);
+        goto cleanup;
     }
 
-    if ((bind(server_fd, (struct sockaddr *)server->ai_addr, server->ai_addrlen)) == -1)
+    if (bind(server_fd, server->ai_addr, server->ai_addrlen) == -1)
     {
-        destroy_mutex_table(mutex_table);
-        destroy_hash_table(curr_login_table);
-        destroy_hash_table(registered_table);
-        close(server_fd);
-        freeaddrinfo(server);
         perror("bind");
-        exit(EXIT_FAILURE);
+        goto cleanup;
     }
 
     freeaddrinfo(server);
+    server = NULL;
 
-    if ((listen(server_fd, LISTEN_BUF_LEN)) == -1)
+    if (listen(server_fd, LISTEN_BUF_LEN) == -1)
     {
-        destroy_mutex_table(mutex_table);
-        destroy_hash_table(curr_login_table);
-        destroy_hash_table(registered_table);
-        close(server_fd);
         perror("listen");
-        exit(EXIT_FAILURE);
+        goto cleanup;
     }
 
-    int epoll_fd = epoll_create1(0);
+    epoll_fd = epoll_create1(0);
     if (epoll_fd == -1)
     {
-        destroy_mutex_table(mutex_table);
-        destroy_hash_table(curr_login_table);
-        destroy_hash_table(registered_table);
         perror("epoll_create1");
-        close(server_fd);
-        exit(EXIT_FAILURE);
+        goto cleanup;
     }
 
-    struct epoll_event event, events[MAX_EVENTS];
-    event.events = EPOLLIN;
-    event.data.fd = server_fd;
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event);
+    struct epoll_event event = {
+        .events = EPOLLIN,
+        .data.fd = server_fd};
 
-    int client_fd;
-
-    service_queue = create_queue();
-    if (!service_queue)
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event) == -1)
     {
-        destroy_mutex_table(mutex_table);
+        perror("epoll_ctl");
+        goto cleanup;
+    }
+
+    ret = server_event_loop(epoll_fd, server_fd);
+
+cleanup:
+    if (server)
+        freeaddrinfo(server);
+    if (epoll_fd != -1)
         close(epoll_fd);
-        perror("malloc");
+    if (server_fd != -1)
         close(server_fd);
+    if (curr_login_table)
         destroy_hash_table(curr_login_table);
+    if (registered_table)
         destroy_hash_table(registered_table);
-        exit(EXIT_FAILURE);
-    }
 
-    while (true)
-    {
-        int num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-        for (int counter = 0; counter < num_events; counter++)
-        {
-            if (events[counter].data.fd == server_fd)
-            {
-                // new incoming connection
-                client_fd = accept(server_fd, NULL, NULL);
-                if (client_fd >= 0)
-                {
-                    make_socket_nonblocking(client_fd);
-                    event.events = EPOLLIN | EPOLLET;
-                    event.data.fd = client_fd;
-                    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event);
-                }
-                else
-                {
-                    destroy_mutex_table(mutex_table);
-                    destroy_queue(service_queue);
-                    destroy_hash_table(curr_login_table);
-                    close(server_fd);
-                    close(epoll_fd);
-                    perror("accept");
-                    destroy_hash_table(registered_table);
-                    exit(EXIT_FAILURE);
-                }
-            }
-            else
-            {
-                if (!mutex_table_search(mutex_table, events[counter].data.fd))
-                {
-                    mutex_table_insert(mutex_table, events[counter].data.fd);
-                }
-                char *buffer = (char *)malloc(MAX_DATA_LEN * sizeof(char)); // cleanup handled at the end of thread_handle function
-                if (!buffer)
-                {
-                    destroy_mutex_table(mutex_table);
-                    destroy_queue(service_queue);
-                    destroy_hash_table(curr_login_table);
-                    close(server_fd);
-                    close(epoll_fd);
-                    perror("malloc");
-                    destroy_hash_table(registered_table);
-                    exit(EXIT_FAILURE);
-                }
-
-                int bytes_read = recv(events[counter].data.fd, buffer, MAX_DATA_LEN - 1, 0);
-                buffer[bytes_read] = '\0';
-
-                if (!bytes_read)
-                {
-                    // client closed connection; a recv with zero will occur in this case and only in this case
-                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[counter].data.fd, NULL);
-                    close(events[counter].data.fd);
-                    free(buffer);
-                }
-                else
-                {
-                    char *current_pos = buffer;
-                    char *next_delim;
-
-                    pthread_mutex_lock(&service_queue_mutex);
-
-                    while ((next_delim = strstr(current_pos, "\r\n")) != NULL)
-                    {
-                        size_t service_len = next_delim - current_pos;
-                        char *service = (char *)malloc((service_len + 1) * sizeof(char));
-
-                        if (!service)
-                        {
-                            destroy_mutex_table(mutex_table);
-                            pthread_mutex_unlock(&service_queue_mutex);
-                            destroy_queue(service_queue);
-                            destroy_hash_table(curr_login_table);
-                            free(buffer);
-                            close(server_fd);
-                            close(epoll_fd);
-                            perror("malloc");
-                            destroy_hash_table(registered_table);
-                            exit(EXIT_FAILURE);
-                        }
-
-                        strncpy(service, current_pos, service_len);
-                        service[service_len] = '\0';
-
-                        if (enqueue(events[counter].data.fd, service, service_queue) == -1)
-                        {
-                            destroy_mutex_table(mutex_table);
-                            pthread_mutex_unlock(&service_queue_mutex);
-                            destroy_queue(service_queue);
-                            destroy_hash_table(curr_login_table);
-                            free(service);
-                            free(buffer);
-                            close(server_fd);
-                            close(epoll_fd);
-                            perror("malloc");
-                            destroy_hash_table(registered_table);
-                            exit(EXIT_FAILURE);
-                        }
-
-                        pthread_cond_signal(&service_queue_cond);
-                        current_pos = next_delim + 2; // Skip past \r\n
-                    }
-
-                    // Handle any remaining data that doesn't end with \r\n
-                    if (*current_pos != '\0')
-                    {
-                        size_t service_len = strlen(current_pos);
-                        char *service = (char *)malloc((service_len + 1) * sizeof(char));
-
-                        if (!service)
-                        {
-                            destroy_mutex_table(mutex_table);
-                            pthread_mutex_unlock(&service_queue_mutex);
-                            destroy_queue(service_queue);
-                            destroy_hash_table(curr_login_table);
-                            free(buffer);
-                            close(server_fd);
-                            close(epoll_fd);
-                            perror("malloc");
-                            destroy_hash_table(registered_table);
-                            exit(EXIT_FAILURE);
-                        }
-
-                        strcpy(service, current_pos);
-
-                        if (enqueue(events[counter].data.fd, service, service_queue) == -1)
-                        {
-                            destroy_mutex_table(mutex_table);
-                            pthread_mutex_unlock(&service_queue_mutex);
-                            destroy_queue(service_queue);
-                            destroy_hash_table(curr_login_table);
-                            free(service);
-                            free(buffer);
-                            close(server_fd);
-                            close(epoll_fd);
-                            perror("malloc");
-                            destroy_hash_table(registered_table);
-                            exit(EXIT_FAILURE);
-                        }
-
-                        pthread_cond_signal(&service_queue_cond);
-                    }
-
-                    pthread_mutex_unlock(&service_queue_mutex);
-                    free(buffer);
-                }
-            }
-        }
-    }
-
-    close(server_fd);
-    close(epoll_fd);
-    destroy_queue(service_queue);
-    destroy_hash_table(curr_login_table);
-    destroy_mutex_table(mutex_table);
-    destroy_hash_table(registered_table);
-    return EXIT_SUCCESS;
+    return ret;
 }

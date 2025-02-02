@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <errno.h>
 #include <stdio.h>
 #include <ctype.h>
 
@@ -22,15 +23,19 @@
 
 #define MAX_SERVICE_LEN (256)
 
+typedef struct
+{
+    queue_t *queue;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+} thread_data_t;
+
 static hash_table_t *curr_login_table;
 static hash_table_t *registered_table;
-static queue_t *service_queue;
-static mutex_table_t *mutex_table;
+
+static thread_data_t thread_data_arr[THREAD_POOL_SIZE];
 
 static pthread_t thread_pool[THREAD_POOL_SIZE];
-
-static pthread_mutex_t service_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t service_queue_cond = PTHREAD_COND_INITIALIZER;
 
 static pthread_mutex_t curr_login_table_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t registered_table_mutex = PTHREAD_MUTEX_INITIALIZER;
