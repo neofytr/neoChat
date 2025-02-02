@@ -324,7 +324,7 @@ void cleanup_client_connection(int epoll_fd, int client_fd)
     pthread_mutex_lock(&curr_login_table_mutex);
     hash_table_delete_via_id(curr_login_table, client_fd);
     pthread_mutex_unlock(&curr_login_table_mutex);
-} 
+}
 
 int process_client_data(int client_fd, char *buffer, ssize_t bytes_read, size_t thread_index)
 {
@@ -512,7 +512,6 @@ int main()
 {
     struct addrinfo hints, *server = NULL;
     int server_fd = -1, epoll_fd = -1;
-    bool threads_initialized = false;
     int ret = EXIT_FAILURE;
 
     pthread_attr_t attr;
@@ -566,7 +565,6 @@ int main()
         }
     }
 
-    threads_initialized = true;
     pthread_attr_destroy(&attr);
 
     if (!(curr_login_table = create_hash_table()) ||
