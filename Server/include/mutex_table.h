@@ -92,7 +92,7 @@ bool mutex_table_insert(mutex_table_t *table, int32_t user_fd)
     }
 
     new_node->user_fd = user_fd;
-    new_node->user_mutex = PTHREAD_MUTEX_INITIALIZER;
+    new_node->user_mutex = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
     new_node->next_node = table->buckets[hash];
     table->buckets[hash] = new_node;
 

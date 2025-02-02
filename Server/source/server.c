@@ -211,9 +211,10 @@ void *thread_function(void *arg)
         dequeue(service_queue);
         pthread_mutex_unlock(&service_queue_mutex);
 
-        pthread_mutex_lock(&usermutex[client_fd]);
+        mutex_node_t *user_mutex_node = mutex_table_search(mutex_table, client_fd);
+        pthread_mutex_lock(&user_mutex_node->user_mutex);
         handle_service(client_fd, service);
-        pthread_mutex_unlock(&usermutex[client_fd]);
+        pthread_mutex_unlock(&user_mutex_node->user_mutex);
         free(service);
     }
 
@@ -289,9 +290,18 @@ int main()
         exit(EXIT_FAILURE);
     }
 
+    mutex_table = create_mutex_table();
+    if (!mutex_table)
+    {
+        destroy_hash_table(curr_login_table);
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+
     registered_table = create_hash_table();
     if (!registered_table)
     {
+        destroy_mutex_table(mutex_table);
         destroy_hash_table(curr_login_table);
         perror("malloc");
         exit(EXIT_FAILURE);
@@ -406,6 +416,10 @@ int main()
             }
             else
             {
+                if (!mutex_table_search(mutex_table, events[counter].data.fd))
+                {
+                    mutex_table_insert(mutex_table, events[counter].data.fd);
+                }
                 char *buffer = (char *)malloc(MAX_DATA_LEN * sizeof(char)); // cleanup handled at the end of thread_handle function
                 if (!buffer)
                 {
