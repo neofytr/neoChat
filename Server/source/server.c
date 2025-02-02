@@ -309,6 +309,7 @@ int main()
 
     if (getaddrinfo(NULL, CHAT_PORT, &hints, &server))
     {
+        destroy_mutex_table(mutex_table);
         destroy_hash_table(curr_login_table);
         destroy_hash_table(registered_table);
         perror("getaddrinfo");
@@ -318,6 +319,7 @@ int main()
     int server_fd = socket(server->ai_family, server->ai_socktype, server->ai_protocol);
     if (server_fd == -1)
     {
+        destroy_mutex_table(mutex_table);
         destroy_hash_table(curr_login_table);
         destroy_hash_table(registered_table);
         freeaddrinfo(server);
@@ -330,6 +332,7 @@ int main()
     int yes = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1)
     {
+        destroy_mutex_table(mutex_table);
         destroy_hash_table(curr_login_table);
         destroy_hash_table(registered_table);
         perror("setsockopt");
@@ -340,6 +343,7 @@ int main()
 
     if ((bind(server_fd, (struct sockaddr *)server->ai_addr, server->ai_addrlen)) == -1)
     {
+        destroy_mutex_table(mutex_table);
         destroy_hash_table(curr_login_table);
         destroy_hash_table(registered_table);
         close(server_fd);
@@ -352,6 +356,7 @@ int main()
 
     if ((listen(server_fd, LISTEN_BUF_LEN)) == -1)
     {
+        destroy_mutex_table(mutex_table);
         destroy_hash_table(curr_login_table);
         destroy_hash_table(registered_table);
         close(server_fd);
@@ -362,6 +367,7 @@ int main()
     int epoll_fd = epoll_create1(0);
     if (epoll_fd == -1)
     {
+        destroy_mutex_table(mutex_table);
         destroy_hash_table(curr_login_table);
         destroy_hash_table(registered_table);
         perror("epoll_create1");
@@ -379,6 +385,7 @@ int main()
     service_queue = create_queue();
     if (!service_queue)
     {
+        destroy_mutex_table(mutex_table);
         close(epoll_fd);
         perror("malloc");
         close(server_fd);
@@ -405,6 +412,7 @@ int main()
                 }
                 else
                 {
+                    destroy_mutex_table(mutex_table);
                     destroy_queue(service_queue);
                     destroy_hash_table(curr_login_table);
                     close(server_fd);
@@ -423,6 +431,7 @@ int main()
                 char *buffer = (char *)malloc(MAX_DATA_LEN * sizeof(char)); // cleanup handled at the end of thread_handle function
                 if (!buffer)
                 {
+                    destroy_mutex_table(mutex_table);
                     destroy_queue(service_queue);
                     destroy_hash_table(curr_login_table);
                     close(server_fd);
@@ -456,6 +465,7 @@ int main()
 
                         if (!service)
                         {
+                            destroy_mutex_table(mutex_table);
                             pthread_mutex_unlock(&service_queue_mutex);
                             destroy_queue(service_queue);
                             destroy_hash_table(curr_login_table);
@@ -472,6 +482,7 @@ int main()
 
                         if (enqueue(events[counter].data.fd, service, service_queue) == -1)
                         {
+                            destroy_mutex_table(mutex_table);
                             pthread_mutex_unlock(&service_queue_mutex);
                             destroy_queue(service_queue);
                             destroy_hash_table(curr_login_table);
@@ -496,6 +507,7 @@ int main()
 
                         if (!service)
                         {
+                            destroy_mutex_table(mutex_table);
                             pthread_mutex_unlock(&service_queue_mutex);
                             destroy_queue(service_queue);
                             destroy_hash_table(curr_login_table);
@@ -511,6 +523,7 @@ int main()
 
                         if (enqueue(events[counter].data.fd, service, service_queue) == -1)
                         {
+                            destroy_mutex_table(mutex_table);
                             pthread_mutex_unlock(&service_queue_mutex);
                             destroy_queue(service_queue);
                             destroy_hash_table(curr_login_table);
@@ -537,6 +550,7 @@ int main()
     close(epoll_fd);
     destroy_queue(service_queue);
     destroy_hash_table(curr_login_table);
+    destroy_mutex_table(mutex_table);
     destroy_hash_table(registered_table);
     return EXIT_SUCCESS;
 }
