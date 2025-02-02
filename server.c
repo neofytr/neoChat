@@ -10,6 +10,8 @@
 #define CHAT_PORT "4040"
 #define LISTEN_BUF_LEN (100)
 
+#define MAX_DATA_LEN (8192)
+
 #define THREAD_POOL_SIZE (16)
 #define MAX_EVENTS (500)
 
@@ -165,10 +167,26 @@ int main(int argc, char **argv)
             }
             else
             {
-                char buffer[1024];
-                int bytes_read = recv(events[counter].data.fd, buffer, sizeof(buffer), 0);
+                char *buffer = (char *)malloc(MAX_DATA_LEN * sizeof(char));
+                if (!buffer)
+                {
+                    close(server_fd);
+                    close(epoll_fd);
+                    perror("malloc");
+                    exit(EXIT_FAILURE);
+                }
+                int bytes_read = recv(events[counter].data.fd, buffer, MAX_DATA_LEN - 1, 0);
                 buffer[bytes_read] = '\0';
-                printf("Data received: %s\n", buffer);
+
+                if (bytes_read == 0)
+                {
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[counter].data.fd, NULL);
+                    close(events[counter].data.fd);
+                }
+                else
+                {
+                    
+                }
             }
         }
     }
