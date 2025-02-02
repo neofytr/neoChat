@@ -13,6 +13,7 @@ typedef struct hash_node
 {
     char username[MAX_USERNAME_LEN];
     char password[MAX_PASS_LEN];
+    int user_fd;
     struct hash_node *next_node;
 } hash_node_t;
 
@@ -24,7 +25,7 @@ typedef struct
 
 hash_table_t *create_hash_table();
 void destroy_hash_table(hash_table_t *table);
-bool hash_table_insert(hash_table_t *table, const char *username, const char *password);
+bool hash_table_insert(hash_table_t *table, const char *username, const char *password, int user_fd);
 hash_node_t *hash_table_search(hash_table_t *table, const char *username);
 bool hash_table_delete(hash_table_t *table, const char *username);
 void hash_table_clear(hash_table_t *table);
@@ -70,7 +71,7 @@ void destroy_hash_table(hash_table_t *table)
     free(table);
 }
 
-bool hash_table_insert(hash_table_t *table, const char *username, const char *password)
+bool hash_table_insert(hash_table_t *table, const char *username, const char *password, int user_fd)
 {
     if (!table || !username || strlen(username) >= MAX_USERNAME_LEN || strlen(password) >= MAX_PASS_LEN)
     {
@@ -95,6 +96,8 @@ bool hash_table_insert(hash_table_t *table, const char *username, const char *pa
 
     strncpy(new_node->password, password, MAX_PASS_LEN - 1);
     new_node->username[strlen(password) - 1] = '\0';
+
+    new_node->user_fd = user_fd;
 
     new_node->next_node = table->buckets[hash];
     table->buckets[hash] = new_node;

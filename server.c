@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <ctype.h>
 
 #include "network.h"
 #include "queue.h"
@@ -17,12 +18,134 @@
 #define THREAD_POOL_SIZE (16)
 #define MAX_EVENTS (500)
 
-pthread_t thread_pool[THREAD_POOL_SIZE];
-pthread_mutex_t service_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t service_queue_cond = PTHREAD_COND_INITIALIZER;
+#define MAX_SERVICE_LEN (256)
+
+static hash_table_t *curr_login_table;
+static hash_table_t *registered_table;
+static pthread_t thread_pool[THREAD_POOL_SIZE];
+
+static pthread_mutex_t service_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t service_queue_cond = PTHREAD_COND_INITIALIZER;
+
+static pthread_mutex_t curr_login_table_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t registered_table_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/*
+
+Service format
+
+ERR 99 is for bad request format
+ERR 98 is for server error
+
+1. login
+
+LOGIN <username> <password>
+
+check if there a user with username in the registered users table; otherwise deny the request in this
+case with ERR 100
+
+check if there is no user with username already in the curr_login_table; otherwise deny the request in this
+case with ERR 101
+
+check if the password is correct acc to the entry in the registered users table; otherwise deny the
+request in this case with ERR 102
+
+add an entry in the curr_login_table with username password user_fd; return OK_LOGGEDIN
+
+2. signup
+
+SIGNUP <username> <password>
+
+check if there is no user with username in the registered users table; otherwise deny the request
+with ERR 103
+
+add an entry in the registered_users_table with username password; return OK_SIGNEDUP
+
+*/
+
+void send_data(int client_fd, char *buffer)
+{
+    size_t bytes_sent = 0;
+    size_t len = strlen(buffer);
+    while (bytes_sent < len)
+    {
+        ssize_t ret = send(client_fd, buffer + bytes_sent, len - bytes_sent, 0);
+        if (ret == -1)
+        {
+            return;
+        }
+        bytes_sent += ret;
+    }
+}
+
+void handle_service(int client_fd, char *service)
+{
+    char service_type[MAX_SERVICE_LEN];
+    size_t len = strlen(service);
+
+    for (size_t service_len = 0; service_len < MAX_SERVICE_LEN - 1 && service_len < len; service_len++)
+    {
+        if (isspace(service[service_len]))
+        {
+            service_type[service_len] = '\0';
+            break;
+        }
+        service_type[service_len] = service[service_len];
+    }
+
+    if (strcmp(service_type, "SIGNUP"))
+    {
+#define MAX_USERNAME_LEN 256
+#define MAX_PASS_LEN 256
+        char username[MAX_USERNAME_LEN];
+        char password[MAX_PASS_LEN];
+#undef MAX_USERNAME_LEN
+#undef MAX_PASS_LEN
+        node_t *searched_node = (node_t *)hash_table_search(registered_table, username);
+        if (searched_node)
+        {
+            send_data(client_fd, "ERR 103");
+        }
+        else
+        {
+            pthread_mutex_lock(&registered_table_mutex);
+            while (!hash_table_insert(registered_table, username, password, 0))
+            {
+            }
+
+            send_data(client_fd, "OK_SIGNEDUP");
+        }
+    }
+    else if (strcmp(service_type, "LOGIN"))
+    {
+    }
+    else
+    {
+        send_data(client_fd, "ERR 99");
+    }
+}
 
 void *thread_function(void *arg)
 {
+    queue_t *service_queue = (queue_t *)arg;
+    while (true)
+    {
+        pthread_mutex_lock(&service_queue_mutex);
+        while (is_empty(service_queue))
+        {
+            pthread_cond_wait(&service_queue_cond, &service_queue_mutex);
+        }
+
+        node_t *service_node = peek(service_queue);
+        char *service = service_node->service;
+        int client_fd = service_node->client_fd;
+        dequeue(service_node);
+        pthread_mutex_unlock(&service_queue_mutex);
+
+        handle_service(client_fd, service);
+        free(service);
+    }
+
     return NULL;
 }
 
@@ -68,6 +191,7 @@ int main(int argc, char **argv)
 {
     struct addrinfo hints, *server;
 
+    memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
@@ -87,16 +211,25 @@ int main(int argc, char **argv)
 
     pthread_attr_destroy(&attr);
 
-    hash_table_t *userpass_table = create_hash_table();
-    if (!userpass_table)
+    curr_login_table = create_hash_table();
+    if (!curr_login_table)
     {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+
+    registered_table = create_hash_table();
+    if (!registered_table)
+    {
+        destroy_hash_table(curr_login_table);
         perror("malloc");
         exit(EXIT_FAILURE);
     }
 
     if (getaddrinfo(NULL, CHAT_PORT, &hints, &server))
     {
-        destroy_hash_table(userpass_table);
+        destroy_hash_table(curr_login_table);
+        destroy_hash_table(registered_table);
         perror("getaddrinfo");
         exit(EXIT_FAILURE);
     }
@@ -104,7 +237,8 @@ int main(int argc, char **argv)
     int server_fd = socket(server->ai_family, server->ai_socktype, server->ai_protocol);
     if (server_fd == -1)
     {
-        destroy_hash_table(userpass_table);
+        destroy_hash_table(curr_login_table);
+        destroy_hash_table(registered_table);
         freeaddrinfo(server);
         perror("socket");
         exit(EXIT_FAILURE);
@@ -115,7 +249,8 @@ int main(int argc, char **argv)
     int yes = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1)
     {
-        destroy_hash_table(userpass_table);
+        destroy_hash_table(curr_login_table);
+        destroy_hash_table(registered_table);
         perror("setsockopt");
         close(server_fd);
         freeaddrinfo(server);
@@ -124,7 +259,8 @@ int main(int argc, char **argv)
 
     if ((bind(server_fd, (struct sockaddr *)server->ai_addr, server->ai_addrlen)) == -1)
     {
-        destroy_hash_table(userpass_table);
+        destroy_hash_table(curr_login_table);
+        destroy_hash_table(registered_table);
         close(server_fd);
         freeaddrinfo(server);
         perror("bind");
@@ -135,7 +271,8 @@ int main(int argc, char **argv)
 
     if ((listen(server_fd, LISTEN_BUF_LEN)) == -1)
     {
-        destroy_hash_table(userpass_table);
+        destroy_hash_table(curr_login_table);
+        destroy_hash_table(registered_table);
         close(server_fd);
         perror("listen");
         exit(EXIT_FAILURE);
@@ -144,7 +281,8 @@ int main(int argc, char **argv)
     int epoll_fd = epoll_create1(0);
     if (epoll_fd == -1)
     {
-        destroy_hash_table(userpass_table);
+        destroy_hash_table(curr_login_table);
+        destroy_hash_table(registered_table);
         perror("epoll_create1");
         close(server_fd);
         exit(EXIT_FAILURE);
@@ -163,7 +301,9 @@ int main(int argc, char **argv)
         close(epoll_fd);
         perror("malloc");
         close(server_fd);
-        destroy_hash_table(userpass_table);
+        destroy_hash_table(curr_login_table);
+        destroy_hash_table(registered_table);
+        exit(EXIT_FAILURE);
     }
 
     while (true)
@@ -186,23 +326,25 @@ int main(int argc, char **argv)
                 else
                 {
                     destroy_queue(service_queue);
-                    destroy_hash_table(userpass_table);
+                    destroy_hash_table(curr_login_table);
                     close(server_fd);
                     close(epoll_fd);
                     perror("accept");
+                    destroy_hash_table(registered_table);
                     exit(EXIT_FAILURE);
                 }
             }
             else
             {
-                char *buffer = (char *)malloc(MAX_DATA_LEN * sizeof(char));
+                char *buffer = (char *)malloc(MAX_DATA_LEN * sizeof(char)); // cleanup handled at the end of thread_handle function
                 if (!buffer)
                 {
                     destroy_queue(service_queue);
-                    destroy_hash_table(userpass_table);
+                    destroy_hash_table(curr_login_table);
                     close(server_fd);
                     close(epoll_fd);
                     perror("malloc");
+                    destroy_hash_table(registered_table);
                     exit(EXIT_FAILURE);
                 }
                 int bytes_read = recv(events[counter].data.fd, buffer, MAX_DATA_LEN - 1, 0);
@@ -217,15 +359,19 @@ int main(int argc, char **argv)
                 else
                 {
                     pthread_mutex_lock(&service_queue_mutex);
-                    if (enqueue(events[counter].data.fd, service_queue) == -1)
+                    if (enqueue(events[counter].data.fd, buffer, service_queue) == -1)
                     {
                         destroy_queue(service_queue);
-                        destroy_hash_table(userpass_table);
+                        destroy_hash_table(curr_login_table);
+                        free(buffer);
                         close(server_fd);
                         close(epoll_fd);
                         perror("malloc");
+                        destroy_hash_table(registered_table);
                         exit(EXIT_FAILURE);
                     }
+                    pthread_cond_signal(&service_queue_cond);
+                    pthread_mutex_unlock(&service_queue_mutex);
                 }
             }
         }
@@ -234,6 +380,7 @@ int main(int argc, char **argv)
     close(server_fd);
     close(epoll_fd);
     destroy_queue(service_queue);
-    destroy_hash_table(userpass_table);
+    destroy_hash_table(curr_login_table);
+    destroy_hash_table(registered_table);
     return EXIT_SUCCESS;
 }
