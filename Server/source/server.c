@@ -188,6 +188,64 @@ void handle_service(int client_fd, char *service)
         send_data(client_fd, "OK_LOGGEDIN\r\n");
         pthread_mutex_unlock(&curr_login_table_mutex);
     }
+    else if (!strcmp(service_type, "SEND"))
+    {
+#define MAX_USERNAME_LEN 256
+        char sender[MAX_USERNAME_LEN];
+        char receiver[MAX_USERNAME_LEN];
+#undef MAX_USERNAME_LEN
+
+        size_t sender_len = 0;
+        size_t receiver_len = 0;
+        size_t current_pos = service_len + 1;
+
+        while (current_pos < len && !isspace(service[current_pos]) && sender_len < sizeof(sender) - 1)
+        {
+            sender[sender_len++] = service[current_pos++];
+        }
+        sender[sender_len] = '\0';
+
+        if (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
+
+        while (current_pos < len && !isspace(service[current_pos]) && receiver_len < sizeof(receiver) - 1)
+        {
+            receiver[receiver_len++] = service[current_pos++];
+        }
+        receiver[receiver_len] = '\0';
+
+        if (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
+
+        pthread_mutex_lock(&curr_login_table_mutex);
+
+        hash_node_t *sender_node = (hash_node_t *)hash_table_search(curr_login_table, sender);
+        if (!sender_node)
+        {
+            send_data(client_fd, "ERR 104\r\n");
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            return;
+        }
+
+        hash_node_t *receiver_node = (hash_node_t *)hash_table_search(curr_login_table, receiver);
+        if (!receiver_node)
+        {
+            send_data(client_fd, "ERR 105\r\n");
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            return;
+        }
+
+        char msg_buffer[1024];
+        snprintf(msg_buffer, sizeof(msg_buffer), "MESG %zu %s", len - current_pos, service + current_pos);
+        send_data(receiver_node->user_fd, msg_buffer);
+        send_data(client_fd, "OK_SENT\r\n");
+
+        pthread_mutex_unlock(&curr_login_table_mutex);
+    }
     else
     {
         send_data(client_fd, "ERR 99\r\n");

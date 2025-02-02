@@ -75,4 +75,12 @@ ERR 104
 
 remove the entry username from curr login table; return OK_LOGGEDOUT
 
+3. send
+
+SEND <sender_username> <rcvr_username> msg
+
+check if the sender is in curr login table; otherwise return ERR 104\r\n
+check if the receiver is in curr login table; otherwise return ERR 105\r\n
+send the msg to receiver (format: MESG <mesg_len> <msg>); return OK_SENT to the sender\r\n
+
 */
