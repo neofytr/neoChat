@@ -22,6 +22,8 @@
 
 static hash_table_t *curr_login_table;
 static hash_table_t *registered_table;
+static queue_t *service_queue;
+
 static pthread_t thread_pool[THREAD_POOL_SIZE];
 
 static pthread_mutex_t service_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -82,8 +84,9 @@ void handle_service(int client_fd, char *service)
 {
     char service_type[MAX_SERVICE_LEN];
     size_t len = strlen(service);
+    size_t service_len = 0;
 
-    for (size_t service_len = 0; service_len < MAX_SERVICE_LEN - 1 && service_len < len; service_len++)
+    for (; service_len < MAX_SERVICE_LEN - 1 && service_len < len; service_len++)
     {
         if (isspace(service[service_len]))
         {
@@ -93,7 +96,7 @@ void handle_service(int client_fd, char *service)
         service_type[service_len] = service[service_len];
     }
 
-    if (strcmp(service_type, "SIGNUP"))
+    if (!strcmp(service_type, "SIGNUP"))
     {
 #define MAX_USERNAME_LEN 256
 #define MAX_PASS_LEN 256
@@ -101,6 +104,34 @@ void handle_service(int client_fd, char *service)
         char password[MAX_PASS_LEN];
 #undef MAX_USERNAME_LEN
 #undef MAX_PASS_LEN
+
+        size_t username_len = 0;
+        size_t current_pos = service_len + 1;
+
+        while (current_pos < len && !isspace(service[current_pos]) && username_len < sizeof(username) - 1)
+        {
+            username[username_len++] = service[current_pos++];
+        }
+        username[username_len] = '\0';
+
+        if (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
+
+        size_t password_len = 0;
+        while (current_pos < len && !isspace(service[current_pos]) && password_len < sizeof(password) - 1)
+        {
+            password[password_len++] = service[current_pos++];
+        }
+        password[password_len] = '\0';
+
+        if (username_len == 0 || password_len == 0)
+        {
+            send_data(client_fd, "ERR 99");
+            return;
+        }
+
         node_t *searched_node = (node_t *)hash_table_search(registered_table, username);
         if (searched_node)
         {
@@ -112,11 +143,11 @@ void handle_service(int client_fd, char *service)
             while (!hash_table_insert(registered_table, username, password, 0))
             {
             }
-
+            pthread_mutex_unlock(&registered_table_mutex);
             send_data(client_fd, "OK_SIGNEDUP");
         }
     }
-    else if (strcmp(service_type, "LOGIN"))
+    else if (!strcmp(service_type, "LOGIN"))
     {
     }
     else
@@ -127,7 +158,6 @@ void handle_service(int client_fd, char *service)
 
 void *thread_function(void *arg)
 {
-    queue_t *service_queue = (queue_t *)arg;
     while (true)
     {
         pthread_mutex_lock(&service_queue_mutex);
@@ -139,7 +169,7 @@ void *thread_function(void *arg)
         node_t *service_node = peek(service_queue);
         char *service = service_node->service;
         int client_fd = service_node->client_fd;
-        dequeue(service_node);
+        dequeue(service_queue);
         pthread_mutex_unlock(&service_queue_mutex);
 
         handle_service(client_fd, service);
@@ -295,7 +325,7 @@ int main(int argc, char **argv)
 
     int client_fd;
 
-    queue_t *service_queue = create_queue();
+    service_queue = create_queue();
     if (!service_queue)
     {
         close(epoll_fd);
@@ -350,7 +380,7 @@ int main(int argc, char **argv)
                 int bytes_read = recv(events[counter].data.fd, buffer, MAX_DATA_LEN - 1, 0);
                 buffer[bytes_read] = '\0';
 
-                if (bytes_read == 0)
+                if (!bytes_read)
                 {
                     // client closed connection; a recv with zero will occur in this case and only in this case
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[counter].data.fd, NULL);
