@@ -402,19 +402,19 @@ int handle_client_data(int epoll_fd, struct epoll_event *event)
                 break;
             }
             perror("read");
-            // cleanup_client_connection(epoll_fd, client_fd);
+            cleanup_client_connection(epoll_fd, client_fd);
             return -1;
         }
 
         if (bytes_read == 0)
         {
-            // cleanup_client_connection(epoll_fd, client_fd);
+            cleanup_client_connection(epoll_fd, client_fd);
             return 0;
         }
 
         if (process_client_data(client_fd, read_buffer, bytes_read, thread_index) != 0)
         {
-            // cleanup_client_connection(epoll_fd, client_fd);
+            cleanup_client_connection(epoll_fd, client_fd);
             return -1;
         }
     }
