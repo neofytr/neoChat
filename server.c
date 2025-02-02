@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #include "network.h"
+#include "hash_table.h"
 
 #define CHAT_PORT "4040"
 #define LISTEN_BUF_LEN (100)
@@ -83,8 +84,16 @@ int main(int argc, char **argv)
 
     pthread_attr_destroy(&attr);
 
+    hash_table_t *userpass_table = create_hash_table();
+    if (!userpass_table)
+    {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+
     if (getaddrinfo(NULL, CHAT_PORT, &hints, &server))
     {
+        destroy_hash_table(userpass_table);
         perror("getaddrinfo");
         exit(EXIT_FAILURE);
     }
@@ -92,6 +101,7 @@ int main(int argc, char **argv)
     int server_fd = socket(server->ai_family, server->ai_socktype, server->ai_protocol);
     if (server_fd == -1)
     {
+        destroy_hash_table(userpass_table);
         freeaddrinfo(server);
         perror("socket");
         exit(EXIT_FAILURE);
@@ -102,6 +112,7 @@ int main(int argc, char **argv)
     int yes = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1)
     {
+        destroy_hash_table(userpass_table);
         perror("setsockopt");
         close(server_fd);
         freeaddrinfo(server);
@@ -110,6 +121,7 @@ int main(int argc, char **argv)
 
     if ((bind(server_fd, (struct sockaddr *)server->ai_addr, server->ai_addrlen)) == -1)
     {
+        destroy_hash_table(userpass_table);
         close(server_fd);
         freeaddrinfo(server);
         perror("bind");
@@ -120,6 +132,7 @@ int main(int argc, char **argv)
 
     if ((listen(server_fd, LISTEN_BUF_LEN)) == -1)
     {
+        destroy_hash_table(userpass_table);
         close(server_fd);
         perror("listen");
         exit(EXIT_FAILURE);
@@ -128,6 +141,7 @@ int main(int argc, char **argv)
     int epoll_fd = epoll_create1(0);
     if (epoll_fd == -1)
     {
+        destroy_hash_table(userpass_table);
         perror("epoll_create1");
         close(server_fd);
         exit(EXIT_FAILURE);
@@ -159,6 +173,7 @@ int main(int argc, char **argv)
                 }
                 else
                 {
+                    destroy_hash_table(userpass_table);
                     close(server_fd);
                     close(epoll_fd);
                     perror("accept");
@@ -170,6 +185,7 @@ int main(int argc, char **argv)
                 char *buffer = (char *)malloc(MAX_DATA_LEN * sizeof(char));
                 if (!buffer)
                 {
+                    destroy_hash_table(userpass_table);
                     close(server_fd);
                     close(epoll_fd);
                     perror("malloc");
@@ -185,7 +201,6 @@ int main(int argc, char **argv)
                 }
                 else
                 {
-                    
                 }
             }
         }
@@ -193,5 +208,6 @@ int main(int argc, char **argv)
 
     close(server_fd);
     close(epoll_fd);
+    destroy_hash_table(userpass_table);
     return EXIT_SUCCESS;
 }
