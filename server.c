@@ -137,14 +137,14 @@ void handle_service(int client_fd, char *service)
 
         if (username_len == 0 || password_len == 0)
         {
-            send_data(client_fd, "ERR 99\r\n\r\n");
+            send_data(client_fd, "ERR 99\r\n");
             return;
         }
 
         hash_node_t *searched_node = (hash_node_t *)hash_table_search(registered_table, username);
         if (searched_node)
         {
-            send_data(client_fd, "ERR 103\r\n\r\n");
+            send_data(client_fd, "ERR 103\r\n");
         }
         else
         {
@@ -153,7 +153,7 @@ void handle_service(int client_fd, char *service)
             {
             }
             pthread_mutex_unlock(&registered_table_mutex);
-            send_data(client_fd, "OK_SIGNEDUP\r\n\r\n");
+            send_data(client_fd, "OK_SIGNEDUP\r\n");
         }
     }
     else if (!strcmp(service_type, "LOGOUT"))
@@ -173,7 +173,7 @@ void handle_service(int client_fd, char *service)
 
         if (!username_len)
         {
-            send_data(client_fd, "ERR 99\r\n\r\n");
+            send_data(client_fd, "ERR 99\r\n");
             return;
         }
 
@@ -182,7 +182,7 @@ void handle_service(int client_fd, char *service)
         if (!logged_in_user)
         {
             pthread_mutex_unlock(&curr_login_table_mutex);
-            send_data(client_fd, "ERR 104\r\n\r\n");
+            send_data(client_fd, "ERR 104\r\n");
             return;
         }
 
@@ -190,7 +190,7 @@ void handle_service(int client_fd, char *service)
         {
         }
 
-        send_data(client_fd, "OK_LOGGEDOUT\r\n\r\n");
+        send_data(client_fd, "OK_LOGGEDOUT\r\n");
     }
     else if (!strcmp(service_type, "LOGIN"))
     {
@@ -224,14 +224,14 @@ void handle_service(int client_fd, char *service)
 
         if (!username_len || !password_len)
         {
-            send_data(client_fd, "ERR 99\r\n\r\n");
+            send_data(client_fd, "ERR 99\r\n");
             return;
         }
 
         hash_node_t *registered_user = (hash_node_t *)hash_table_search(registered_table, username);
         if (!registered_user)
         {
-            send_data(client_fd, "ERR 100\r\n\r\n");
+            send_data(client_fd, "ERR 100\r\n");
             return;
         }
 
@@ -240,14 +240,14 @@ void handle_service(int client_fd, char *service)
         if (logged_in_user)
         {
             pthread_mutex_unlock(&curr_login_table_mutex);
-            send_data(client_fd, "ERR 101\r\n\r\n");
+            send_data(client_fd, "ERR 101\r\n");
             return;
         }
 
         if (strcmp(registered_user->password, password) != 0)
         {
             pthread_mutex_unlock(&curr_login_table_mutex);
-            send_data(client_fd, "ERR 102\r\n\r\n");
+            send_data(client_fd, "ERR 102\r\n");
             return;
         }
 
@@ -256,11 +256,11 @@ void handle_service(int client_fd, char *service)
         }
         pthread_mutex_unlock(&curr_login_table_mutex);
 
-        send_data(client_fd, "OK_LOGGEDIN\r\n\r\n");
+        send_data(client_fd, "OK_LOGGEDIN\r\n");
     }
     else
     {
-        send_data(client_fd, "ERR 99\r\n\r\n");
+        send_data(client_fd, "ERR 99\r\n");
     }
 }
 
