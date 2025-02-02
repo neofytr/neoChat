@@ -11,7 +11,6 @@
 #include "network.h"
 #include "queue.h"
 #include "hash_table.h"
-#include "mutex_table.h"
 
 #define CHAT_PORT "4040"
 #define LISTEN_BUF_LEN (100)
