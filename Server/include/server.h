@@ -17,7 +17,7 @@
 
 #define MAX_DATA_LEN (8192)
 
-#define THREAD_POOL_SIZE (16)
+#define THREAD_POOL_SIZE (32)
 #define MAX_EVENTS (500)
 
 #define MAX_SERVICE_LEN (256)

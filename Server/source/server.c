@@ -23,7 +23,7 @@ void handle_service(int client_fd, char *service)
         return;
     }
 
-    char service_type[MAX_SERVICE_LEN] = {0}; 
+    char service_type[MAX_SERVICE_LEN] = {0};
     size_t len = strlen(service);
     size_t service_len = 0;
 
@@ -282,7 +282,7 @@ void handle_service(int client_fd, char *service)
 
         size_t message_len = len - current_pos;
         if (message_len == 0 || message_len > MAX_MESSAGE_LEN - 50)
-        { 
+        {
             pthread_mutex_unlock(&curr_login_table_mutex);
             send_data(client_fd, "ERR 99\r\n");
             return;
@@ -445,7 +445,7 @@ int handle_client_data(int epoll_fd, struct epoll_event *event)
 {
     char read_buffer[MAX_DATA_LEN];
     int client_fd = event->data.fd;
-    size_t thread_index = client_fd & (THREAD_POOL_SIZE - 1);
+    size_t thread_index = client_fd & (THREAD_POOL_SIZE - 1); // lmao the load balancing im doings, aws who?
 
     while (true)
     {
