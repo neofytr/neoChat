@@ -385,14 +385,21 @@ void handle_service(int client_fd, char *service)
             return;
         }
 
+        char *accepting_user = (char *)hash_table_search_via_id(curr_login_table, client_fd);
+        if (!accepting_user)
+        {
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 107\r\n"); // the accepting user not logged in
+        }
+
         char response_msg[MAX_USERNAME_LEN + 32] = {0};
         if (strcmp(response, "ACCEPT") == 0)
         {
-            snprintf(response_msg, sizeof(response_msg), "CHAT_ACCEPTED %s\r\n", requesting_username);
+            snprintf(response_msg, sizeof(response_msg), "CHAT_ACCEPTED %s\r\n", accepting_user);
         }
         else if (strcmp(response, "REJECT") == 0)
         {
-            snprintf(response_msg, sizeof(response_msg), "CHAT_REJECTED %s\r\n", requesting_username);
+            snprintf(response_msg, sizeof(response_msg), "CHAT_REJECTED %s\r\n", accepting_user);
         }
         else
         {
@@ -401,7 +408,6 @@ void handle_service(int client_fd, char *service)
             return;
         }
 
-        // Send response and confirm to responding user
         send_data(requesting_user->user_fd, response_msg);
 
         pthread_mutex_unlock(&curr_login_table_mutex);

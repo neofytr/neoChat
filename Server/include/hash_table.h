@@ -25,6 +25,7 @@ typedef struct
 } hash_table_t;
 
 hash_table_t *create_hash_table();
+char *hash_table_search_via_id(hash_table_t *table, int user_fd);
 void destroy_hash_table(hash_table_t *table);
 bool hash_table_insert(hash_table_t *table, const char *username, const char *password, int user_fd);
 hash_node_t *hash_table_search(hash_table_t *table, const char *username);

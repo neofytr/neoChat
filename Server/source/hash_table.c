@@ -141,6 +141,31 @@ bool hash_table_delete(hash_table_t *table, const char *username)
     return false;
 }
 
+char *hash_table_search_via_id(hash_table_t *table, int user_fd)
+{
+    if (!table)
+    {
+        return false;
+    }
+
+    for (size_t i = 0; i < NUM_BUCKETS; i++)
+    {
+        hash_node_t *current = table->buckets[i];
+
+        while (current)
+        {
+            if (current->user_fd == user_fd)
+            {
+                return current->username;
+            }
+
+            current = current->next_node;
+        }
+    }
+
+    return false;
+}
+
 bool hash_table_delete_via_id(hash_table_t *table, int user_fd)
 {
     if (!table)
