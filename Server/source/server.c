@@ -268,6 +268,144 @@ void handle_service(int client_fd, char *service)
         send_data(client_fd, "OK_LOGGEDOUT\r\n");
         pthread_mutex_unlock(&curr_login_table_mutex);
     }
+    else if (!strcmp(service_type, "REQ"))
+    {
+#define MAX_USERNAME_LEN 256
+        char requested_username[MAX_USERNAME_LEN] = {0};
+        char requesting_username[MAX_USERNAME_LEN] = {0};
+
+        size_t current_pos = service_len;
+        while (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
+
+        size_t requested_username_len = 0;
+        while (current_pos < len && !isspace(service[current_pos]) && requested_username_len < MAX_USERNAME_LEN - 1)
+        {
+            requested_username[requested_username_len++] = service[current_pos++];
+        }
+        requested_username[requested_username_len] = '\0';
+
+        while (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
+
+        size_t requesting_username_len = 0;
+        while (current_pos < len && !isspace(service[current_pos]) && requesting_username_len < MAX_USERNAME_LEN - 1)
+        {
+            requesting_username[requesting_username_len++] = service[current_pos++];
+        }
+        requesting_username[requesting_username_len] = '\0';
+
+        if (!requested_username_len || !requesting_username_len ||
+            requested_username_len >= MAX_USERNAME_LEN ||
+            requesting_username_len >= MAX_USERNAME_LEN)
+        {
+            send_data(client_fd, "ERR 99\r\n");
+            return;
+        }
+
+        if (strcmp(requested_username, requesting_username) == 0)
+        {
+            send_data(client_fd, "ERR 99\r\n");
+            return;
+        }
+
+        pthread_mutex_lock(&curr_login_table_mutex);
+
+        hash_node_t *requesting_user = (hash_node_t *)hash_table_search(curr_login_table, requesting_username);
+        if (!requesting_user || requesting_user->user_fd != client_fd)
+        {
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 104\r\n");
+            return;
+        }
+
+        hash_node_t *requested_user = (hash_node_t *)hash_table_search(curr_login_table, requested_username);
+        if (!requested_user)
+        {
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 106\r\n");
+            return;
+        }
+
+        char request_msg[MAX_USERNAME_LEN + 32] = {0};
+        snprintf(request_msg, sizeof(request_msg), "CHAT_REQ %s\r\n", requesting_username);
+        send_data(requested_user->user_fd, request_msg);
+
+        pthread_mutex_unlock(&curr_login_table_mutex);
+    }
+    else if (!strcmp(service_type, "CHAT_RESP"))
+    {
+#define MAX_RESPONSE_LEN 8
+        char requesting_username[MAX_USERNAME_LEN] = {0};
+        char response[MAX_RESPONSE_LEN] = {0};
+
+        size_t current_pos = service_len;
+        while (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
+
+        size_t requesting_username_len = 0;
+        while (current_pos < len && !isspace(service[current_pos]) && requesting_username_len < MAX_USERNAME_LEN - 1)
+        {
+            requesting_username[requesting_username_len++] = service[current_pos++];
+        }
+        requesting_username[requesting_username_len] = '\0';
+
+        while (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
+
+        size_t response_len = 0;
+        while (current_pos < len && !isspace(service[current_pos]) && response_len < MAX_RESPONSE_LEN - 1)
+        {
+            response[response_len++] = service[current_pos++];
+        }
+        response[response_len] = '\0';
+
+        if (!requesting_username_len || !response_len ||
+            requesting_username_len >= MAX_USERNAME_LEN)
+        {
+            send_data(client_fd, "ERR 99\r\n");
+            return;
+        }
+
+        pthread_mutex_lock(&curr_login_table_mutex);
+
+        hash_node_t *requesting_user = (hash_node_t *)hash_table_search(curr_login_table, requesting_username);
+        if (!requesting_user)
+        {
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 104\r\n");
+            return;
+        }
+
+        char response_msg[MAX_USERNAME_LEN + 32] = {0};
+        if (strcmp(response, "ACCEPT") == 0)
+        {
+            snprintf(response_msg, sizeof(response_msg), "CHAT_ACCEPTED %s\r\n", requesting_username);
+        }
+        else if (strcmp(response, "REJECT") == 0)
+        {
+            snprintf(response_msg, sizeof(response_msg), "CHAT_REJECTED %s\r\n", requesting_username);
+        }
+        else
+        {
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 99\r\n");
+            return;
+        }
+
+        // Send response and confirm to responding user
+        send_data(requesting_user->user_fd, response_msg);
+
+        pthread_mutex_unlock(&curr_login_table_mutex);
+    }
     else if (!strcmp(service_type, "SEND"))
     {
 #define MAX_USERNAME_LEN 256

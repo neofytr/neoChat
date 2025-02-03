@@ -1,245 +1,328 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
 import socket
 import threading
+import sys
 import time
 
 class ChatClient:
-    def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("Chat Application")
-        self.root.geometry("400x500")
+    def __init__(self, host='localhost', port=4040):
+        self.host = host
+        self.port = port
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.current_user = None
+        self.is_chatting = False
+        self.chat_partner = None
+        self.chat_lock = threading.Lock()
+        self.message_queue = []
+        self.queue_lock = threading.Lock()
         
-        self.style = ttk.Style()
-        self.style.configure('TButton', padding=6)
-        self.style.configure('TEntry', padding=3)
-        
-        self.client = None
-        self.server_address = ('localhost', 4040)
-        self.connected = False
-        self.current_username = None
-        
-        self.main_frame = ttk.Frame(self.root, padding="10")
-        self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        self.create_login_frame()
-        self.create_signup_frame()
-        self.create_message_frame()
-        
-        self.show_login_frame()
-        
-    def create_login_frame(self):
-        self.login_frame = ttk.Frame(self.main_frame, padding="10")
-        
-        ttk.Label(self.login_frame, text="Login", font=('Arial', 16, 'bold')).grid(row=0, column=0, columnspan=2, pady=10)
-        
-        ttk.Label(self.login_frame, text="Username:").grid(row=1, column=0, pady=5)
-        self.login_username = ttk.Entry(self.login_frame)
-        self.login_username.grid(row=1, column=1, pady=5)
-        
-        ttk.Label(self.login_frame, text="Password:").grid(row=2, column=0, pady=5)
-        self.login_password = ttk.Entry(self.login_frame, show="*")
-        self.login_password.grid(row=2, column=1, pady=5)
-        
-        ttk.Button(self.login_frame, text="Login", command=self.handle_login).grid(row=3, column=0, columnspan=2, pady=10)
-        ttk.Button(self.login_frame, text="Go to Signup", command=self.show_signup_frame).grid(row=4, column=0, columnspan=2)
-        
-    def create_signup_frame(self):
-        self.signup_frame = ttk.Frame(self.main_frame, padding="10")
-        
-        ttk.Label(self.signup_frame, text="Sign Up", font=('Arial', 16, 'bold')).grid(row=0, column=0, columnspan=2, pady=10)
-        
-        ttk.Label(self.signup_frame, text="Username:").grid(row=1, column=0, pady=5)
-        self.signup_username = ttk.Entry(self.signup_frame)
-        self.signup_username.grid(row=1, column=1, pady=5)
-        
-        ttk.Label(self.signup_frame, text="Password:").grid(row=2, column=0, pady=5)
-        self.signup_password = ttk.Entry(self.signup_frame, show="*")
-        self.signup_password.grid(row=2, column=1, pady=5)
-        
-        ttk.Button(self.signup_frame, text="Sign Up", command=self.handle_signup).grid(row=3, column=0, columnspan=2, pady=10)
-        ttk.Button(self.signup_frame, text="Back to Login", command=self.show_login_frame).grid(row=4, column=0, columnspan=2)
-        
-    def create_message_frame(self):
-        self.message_frame = ttk.Frame(self.main_frame, padding="10")
-        
-        ttk.Label(self.message_frame, text="Send Message", font=('Arial', 16, 'bold')).grid(row=0, column=0, columnspan=2, pady=10)
-        
-        ttk.Label(self.message_frame, text="To:").grid(row=1, column=0, pady=5)
-        self.receiver_username = ttk.Entry(self.message_frame)
-        self.receiver_username.grid(row=1, column=1, pady=5)
-        
-        ttk.Label(self.message_frame, text="Message:").grid(row=2, column=0, pady=5)
-        self.message_text = tk.Text(self.message_frame, height=4, width=30)
-        self.message_text.grid(row=2, column=1, pady=5)
-        
-        ttk.Button(self.message_frame, text="Send", command=self.handle_send).grid(row=3, column=0, columnspan=2, pady=10)
-        ttk.Button(self.message_frame, text="Logout", command=self.handle_logout).grid(row=4, column=0, columnspan=2)
-        
-    def ensure_connection(self):
-        if not self.connected or self.client is None:
-            try:
-                if self.client:
-                    self.client.close()
-                self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.client.connect(self.server_address)
-                self.connected = True
-                return True
-            except Exception as e:
-                self.connected = False
-                messagebox.showerror("Connection Error", f"Could not connect to server: {str(e)}")
-                return False
-        return True
-
-    def send_and_receive(self, request):
-        max_retries = 3
-        retry_delay = 1  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                if not self.ensure_connection():
-                    continue
-                    
-                self.client.send(request.encode())
-                response = self.client.recv(1024).decode().strip()
-                return response
-                
-            except (ConnectionError, socket.error) as e:
-                self.connected = False
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    continue
-                else:
-                    raise ConnectionError(f"Failed to communicate with server after {max_retries} attempts")
-                    
-    def show_login_frame(self):
-        self.signup_frame.grid_remove()
-        self.message_frame.grid_remove()
-        self.login_frame.grid(row=0, column=0)
-        
-    def show_signup_frame(self):
-        self.login_frame.grid_remove()
-        self.message_frame.grid_remove()
-        self.signup_frame.grid(row=0, column=0)
-        
-    def show_message_frame(self):
-        self.login_frame.grid_remove()
-        self.signup_frame.grid_remove()
-        self.message_frame.grid(row=0, column=0)
-        
-    def handle_login(self):
-        username = self.login_username.get()
-        password = self.login_password.get()
-        
-        if not username or not password:
-            messagebox.showerror("Error", "Please fill in all fields")
-            return
-            
+    def connect(self):
         try:
-            request = f"LOGIN {username} {password}\n"
-            response = self.send_and_receive(request)
-            
-            if response == "OK_LOGGEDIN":
-                self.current_username = username
-                messagebox.showinfo("Success", "Logged in successfully!")
-                self.show_message_frame()
-            elif response == "ERR 100":
-                messagebox.showerror("Error", "User not found")
-            elif response == "ERR 101":
-                messagebox.showerror("Error", "User already logged in")
-            elif response == "ERR 102":
-                messagebox.showerror("Error", "Incorrect password")
-            else:
-                messagebox.showerror("Error", f"Unknown error: {response}")
-                
+            self.socket.connect((self.host, self.port))
+            threading.Thread(target=self.listen_for_messages, daemon=True).start()
+            return True
         except Exception as e:
-            messagebox.showerror("Error", f"Connection error: {str(e)}")
-            self.connected = False
+            print(f"Connection error: {e}")
+            return False
             
-    def handle_signup(self):
-        username = self.signup_username.get()
-        password = self.signup_password.get()
-        
-        if not username or not password:
-            messagebox.showerror("Error", "Please fill in all fields")
-            return
-            
+    def send_to_server(self, message):
         try:
-            request = f"SIGNUP {username} {password}\n"
-            response = self.send_and_receive(request)
+            self.socket.send(f"{message}\r\n".encode())
+            with self.queue_lock:
+                if len(self.message_queue) > 0:
+                    response = self.message_queue.pop(0)
+                    return response
+                    
+            response = self.socket.recv(1024).decode().strip()
+            return response
+        except Exception as e:
+            print(f"Error sending message: {e}")
+            sys.exit(1)
+
+    def signup(self):
+        while True:
+            username = input("Enter username: ").strip()
+            if not username or ' ' in username:
+                print("Invalid username. Username cannot be empty or contain spaces.")
+                continue
+                
+            password = input("Enter password: ").strip()
+            if not password or ' ' in password:
+                print("Invalid password. Password cannot be empty or contain spaces.")
+                continue
+                
+            response = self.send_to_server(f"SIGNUP {username} {password}")
             
             if response == "OK_SIGNEDUP":
-                messagebox.showinfo("Success", "Signed up successfully!")
-                self.show_login_frame()
+                print("Successfully signed up!")
+                return True
             elif response == "ERR 103":
-                messagebox.showerror("Error", "Username already exists")
+                print("Username already exists!")
+            elif response == "ERR 99":
+                print("Invalid request format!")
+            elif response == "ERR 98":
+                print("Server error occurred!")
             else:
-                messagebox.showerror("Error", f"Unknown error: {response}")
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Connection error: {str(e)}")
-            self.connected = False
+                print(f"Unexpected error: {response}")
             
-    def handle_send(self):
-        receiver = self.receiver_username.get()
-        message = self.message_text.get("1.0", tk.END).strip()
+            retry = input("Would you like to try again? (y/n): ")
+            if retry.lower() != 'y':
+                return False
+
+    def login(self):
+        while True:
+            if self.current_user:
+                print("Already logged in!")
+                return True
+                
+            username = input("Enter username: ").strip()
+            if not username or ' ' in username:
+                print("Invalid username. Username cannot be empty or contain spaces.")
+                continue
+                
+            password = input("Enter password: ").strip()
+            if not password or ' ' in password:
+                print("Invalid password. Password cannot be empty or contain spaces.")
+                continue
+                
+            response = self.send_to_server(f"LOGIN {username} {password}")
+            
+            if response == "OK_LOGGEDIN":
+                print("Successfully logged in!")
+                self.current_user = username
+                return True
+            elif response == "ERR 100":
+                print("User not registered!")
+            elif response == "ERR 101":
+                print("User already logged in!")
+            elif response == "ERR 102":
+                print("Incorrect password!")
+            elif response == "ERR 99":
+                print("Invalid request format!")
+            elif response == "ERR 98":
+                print("Server error occurred!")
+            else:
+                print(f"Unexpected error: {response}")
+            
+            retry = input("Would you like to try again? (y/n): ")
+            if retry.lower() != 'y':
+                return False
+
+    def poll_users(self):
+        if not self.current_user:
+            print("Please login first!")
+            return []
         
-        if not receiver or not message:
-            messagebox.showerror("Error", "Please fill in all fields")
+        response = self.send_to_server("POLL")
+        if response.startswith("USERS"):
+            users = response.split()[1:]  # Remove the "USERS" prefix
+            if users:
+                print("\nCurrently online users:")
+                for user in users:
+                    if user != self.current_user:
+                        print(f"- {user}")
+            else:
+                print("No other users online")
+            return users
+        else:
+            print(f"Error polling users: {response}")
+            return []
+
+    def handle_chat_request(self, requesting_user):
+        if self.is_chatting:
+            self.send_to_server(f"CHAT_RESP {requesting_user} REJECT")
             return
             
-        try:
-            request = f"SEND {self.current_username} {receiver} {message}\n"
-            response = self.send_and_receive(request)
-            
-            if response == "OK_SENT":
-                messagebox.showinfo("Success", "Message sent successfully!")
-                self.message_text.delete("1.0", tk.END)
-            elif response == "ERR 104":
-                messagebox.showerror("Error", "Sender not logged in")
-            elif response == "ERR 105":
-                messagebox.showerror("Error", "Receiver not logged in")
-            else:
-                messagebox.showerror("Error", f"Unknown error: {response}")
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Connection error: {str(e)}")
-            self.connected = False
-            
-    def handle_logout(self):
-        try:
-            request = f"LOGOUT {self.current_username}\n"
-            response = self.send_and_receive(request)
-            
-            if response == "OK_LOGGEDOUT":
-                messagebox.showinfo("Success", "Logged out successfully!")
-                self.current_username = None
-                self.connected = False
-                if self.client:
-                    self.client.close()
-                self.client = None
-                self.show_login_frame()
-            elif response == "ERR 104":
-                messagebox.showerror("Error", "User not logged in")
-            else:
-                messagebox.showerror("Error", f"Unknown error: {response}")
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Connection error: {str(e)}")
-            self.connected = False
-            
-    def cleanup(self):
-        if self.client:
-            try:
-                self.client.close()
-            except:
-                pass
-        self.root.destroy()
+        print(f"\nChat request from {requesting_user}")
+        choice = input("Accept chat? (y/n): ").lower()
         
-    def run(self):
-        self.root.protocol("WM_DELETE_WINDOW", self.cleanup)
-        self.root.mainloop()
+        if choice == 'y':
+            self.send_to_server(f"CHAT_RESP {requesting_user} ACCEPT")
+            with self.chat_lock:
+                self.is_chatting = True
+                self.chat_partner = requesting_user
+            print(f"\nStarting chat with {requesting_user}")
+        else:
+            self.send_to_server(f"CHAT_RESP {requesting_user} REJECT")
+
+    def start_chat_session(self, partner):
+        with self.chat_lock:
+            self.is_chatting = True
+            self.chat_partner = partner
+        
+        print("\nChat session started")
+        print("Type 'exit' to end chat")
+        
+        while self.is_chatting:
+            try:
+                message = input(f"{self.current_user}: ").strip()
+                if not message:
+                    continue
+                    
+                if message.lower() == 'exit':
+                    with self.chat_lock:
+                        self.is_chatting = False
+                        self.chat_partner = None
+                    print("Chat session ended")
+                    break
+                    
+                response = self.send_to_server(f"SEND {self.current_user} {partner} {message}")
+                if response == "ERR 104":
+                    print("You are not logged in!")
+                    break
+                elif response == "ERR 105":
+                    print("Chat partner is no longer online!")
+                    break
+                elif response == "ERR 99":
+                    print("Invalid message format!")
+                elif response == "ERR 98":
+                    print("Server error occurred!")
+                    break
+                elif response != "OK_SENT":
+                    print(f"Unexpected error: {response}")
+                    break
+                    
+            except Exception as e:
+                print(f"Error in chat session: {e}")
+                break
+        
+        with self.chat_lock:
+            self.is_chatting = False
+            self.chat_partner = None
+
+    def chat_with_user(self):
+        if not self.current_user:
+            print("Please login first!")
+            return
+            
+        if self.is_chatting:
+            print("Already in a chat session!")
+            return
+            
+        users = self.poll_users()
+        if not users:
+            return
+            
+        target_user = input("\nEnter username to chat with: ").strip()
+        if not target_user or target_user == self.current_user:
+            print("Invalid user selection!")
+            return
+            
+        if target_user not in users:
+            print("User not online!")
+            return
+            
+        response = self.send_to_server(f"REQ {target_user} {self.current_user}")
+        
+        if response == "ERR 106":
+            print("User not online!")
+        elif response == "OK_SENT":
+            print(f"Chat request sent to {target_user}, waiting for response...")
+        else:
+            print(f"Error sending chat request: {response}")
+
+    def listen_for_messages(self):
+        while True:
+            try:
+                data = self.socket.recv(1024).decode().strip()
+                if not data:
+                    print("\nDisconnected from server")
+                    sys.exit(1)
+                
+                if data.startswith("MESG"):
+                    _, msg_len, *msg_parts = data.split(maxsplit=2)
+                    message = msg_parts[0] if msg_parts else ""
+                    if self.is_chatting:
+                        print(f"\n{self.chat_partner}: {message}")
+                        print(f"{self.current_user}: ", end='', flush=True)
+                
+                elif data.startswith("CHAT_REQ"):
+                    requesting_user = data.split()[1]
+                    self.handle_chat_request(requesting_user)
+                
+                elif data.startswith("CHAT_ACCEPTED"):
+                    accepted_user = data.split()[1]
+                    print(f"\nChat request accepted by {accepted_user}")
+                    self.start_chat_session(accepted_user)
+                
+                elif data.startswith("CHAT_REJECTED"):
+                    rejected_user = data.split()[1]
+                    print(f"\nChat request rejected by {rejected_user}")
+                    with self.chat_lock:
+                        self.is_chatting = False
+                        self.chat_partner = None
+                
+                else:
+                    with self.queue_lock:
+                        self.message_queue.append(data)
+                
+            except Exception as e:
+                print(f"\nConnection error: {e}")
+                sys.exit(1)
+
+    def logout(self):
+        if not self.current_user:
+            print("Not logged in!")
+            return True
+            
+        if self.is_chatting:
+            print("Please exit the current chat session first!")
+            return False
+            
+        response = self.send_to_server(f"LOGOUT {self.current_user}")
+        if response == "OK_LOGGEDOUT":
+            print("Successfully logged out!")
+            self.current_user = None
+            return True
+        elif response == "ERR 104":
+            print("Not logged in!")
+            self.current_user = None
+            return True
+        else:
+            print(f"Error logging out: {response}")
+            return False
+
+    def main_menu(self):
+        while True:
+            print("\n=== Chat Client Menu ===")
+            print("1. Sign up")
+            print("2. Login")
+            print("3. Poll for users")
+            print("4. Chat with user")
+            print("5. Logout")
+            print("6. Exit")
+            
+            choice = input("\nEnter your choice (1-6): ").strip()
+            
+            if choice == '1':
+                self.signup()
+            elif choice == '2':
+                self.login()
+            elif choice == '3':
+                self.poll_users()
+            elif choice == '4':
+                self.chat_with_user()
+            elif choice == '5':
+                self.logout()
+            elif choice == '6':
+                if self.current_user:
+                    self.logout()
+                print("Goodbye!")
+                sys.exit(0)
+            else:
+                print("Invalid choice!")
+
+def main():
+    client = ChatClient()
+    if client.connect():
+        try:
+            client.main_menu()
+        except KeyboardInterrupt:
+            if client.current_user:
+                client.logout()
+            print("\nGoodbye!")
+            sys.exit(0)
+    else:
+        print("Failed to connect to server")
 
 if __name__ == "__main__":
-    app = ChatClient()
-    app.run()
+    main()

@@ -105,4 +105,20 @@ POLL
 
 send all the users in the curr_login_table (format USERS <username_one> <username_two> ...\r\n)
 
+5. request a user for chatting
+
+REQ <requested_username> <requesting_user>
+
+return ERR 106 if req user not on the server
+
+forward to the requested user CHAT_REQ <requesting_username>\r\n
+
+6. server response to CHAT_RESP <requesting_username> ACCEPT/REJECT
+
+send CHAT_ACCEPTED/REJECTED <requesting_username>
+handle requisite errors by creating new ones for the same
+
+
+
+
 */
