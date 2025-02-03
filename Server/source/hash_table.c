@@ -41,7 +41,15 @@ void destroy_hash_table(hash_table_t *table)
 
 bool hash_table_insert(hash_table_t *table, const char *username, const char *password, int user_fd)
 {
-    if (!table || !username || strlen(username) >= MAX_USERNAME_LEN || strlen(password) >= MAX_PASS_LEN)
+    if (!table || !username || !password)
+    {
+        return false;
+    }
+
+    size_t username_len = strlen(username);
+    size_t password_len = strlen(password);
+
+    if (username_len >= MAX_USERNAME_LEN || password_len >= MAX_PASS_LEN)
     {
         return false;
     }
@@ -52,24 +60,23 @@ bool hash_table_insert(hash_table_t *table, const char *username, const char *pa
     }
 
     size_t hash = get_hash(username);
-
     hash_node_t *new_node = (hash_node_t *)malloc(sizeof(hash_node_t));
     if (!new_node)
     {
         return false;
     }
 
+    memset(new_node, 0, sizeof(hash_node_t));
+
     strncpy(new_node->username, username, MAX_USERNAME_LEN - 1);
-    new_node->username[strlen(username)] = '\0';
+    new_node->username[MAX_USERNAME_LEN - 1] = '\0';
 
     strncpy(new_node->password, password, MAX_PASS_LEN - 1);
-    new_node->username[strlen(password)] = '\0';
+    new_node->password[MAX_PASS_LEN - 1] = '\0';
 
     new_node->user_fd = user_fd;
-
     new_node->next_node = table->buckets[hash];
     table->buckets[hash] = new_node;
-
     table->total_entries++;
 
     return true;

@@ -17,7 +17,13 @@ void send_data(int client_fd, char *buffer)
 
 void handle_service(int client_fd, char *service)
 {
-    char service_type[MAX_SERVICE_LEN];
+    if (!service)
+    {
+        send_data(client_fd, "ERR 99\r\n");
+        return;
+    }
+
+    char service_type[MAX_SERVICE_LEN] = {0}; 
     size_t len = strlen(service);
     size_t service_len = 0;
 
@@ -25,37 +31,39 @@ void handle_service(int client_fd, char *service)
     {
         if (isspace(service[service_len]))
         {
-            service_type[service_len] = '\0';
             break;
         }
         service_type[service_len] = service[service_len];
     }
+    service_type[service_len] = '\0';
 
     if (!strcmp(service_type, "SIGNUP"))
     {
 #define MAX_USERNAME_LEN 256
 #define MAX_PASS_LEN 256
-        char username[MAX_USERNAME_LEN];
-        char password[MAX_PASS_LEN];
-#undef MAX_USERNAME_LEN
-#undef MAX_PASS_LEN
+        char username[MAX_USERNAME_LEN] = {0};
+        char password[MAX_PASS_LEN] = {0};
+
+        size_t current_pos = service_len;
+        while (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
 
         size_t username_len = 0;
-        size_t current_pos = service_len + 1;
-
-        while (current_pos < len && !isspace(service[current_pos]) && username_len < sizeof(username) - 1)
+        while (current_pos < len && !isspace(service[current_pos]) && username_len < MAX_USERNAME_LEN - 1)
         {
             username[username_len++] = service[current_pos++];
         }
         username[username_len] = '\0';
 
-        if (current_pos < len && isspace(service[current_pos]))
+        while (current_pos < len && isspace(service[current_pos]))
         {
             current_pos++;
         }
 
         size_t password_len = 0;
-        while (current_pos < len && !isspace(service[current_pos]) && password_len < sizeof(password) - 1)
+        while (current_pos < len && !isspace(service[current_pos]) && password_len < MAX_PASS_LEN - 1)
         {
             password[password_len++] = service[current_pos++];
         }
@@ -67,83 +75,61 @@ void handle_service(int client_fd, char *service)
             return;
         }
 
+        for (size_t i = 0; i < username_len; i++)
+        {
+            if (!isalnum(username[i]) && username[i] != '_')
+            {
+                send_data(client_fd, "ERR 99\r\n");
+                return;
+            }
+        }
+
+        pthread_mutex_lock(&registered_table_mutex);
         hash_node_t *searched_node = (hash_node_t *)hash_table_search(registered_table, username);
         if (searched_node)
         {
-            send_data(client_fd, "ERR 103\r\n");
-        }
-        else
-        {
-            pthread_mutex_lock(&registered_table_mutex);
-            while (!hash_table_insert(registered_table, username, password, 0))
-            {
-            }
-            send_data(client_fd, "OK_SIGNEDUP\r\n");
             pthread_mutex_unlock(&registered_table_mutex);
+            send_data(client_fd, "ERR 103\r\n");
+            return;
         }
-    }
-    else if (!strcmp(service_type, "LOGOUT"))
-    {
-#define MAX_USERNAME_LEN 256
-        char username[MAX_USERNAME_LEN];
-#undef MAX_USERNAME_LEN
 
-        size_t username_len = 0;
-        size_t current_pos = service_len + 1;
-
-        while (current_pos < len && !isspace(service[current_pos]) && username_len < sizeof(username) - 1)
+        if (!hash_table_insert(registered_table, username, password, 0))
         {
-            username[username_len++] = service[current_pos++];
-        }
-        username[username_len] = '\0';
-
-        if (!username_len)
-        {
+            pthread_mutex_unlock(&registered_table_mutex);
             send_data(client_fd, "ERR 99\r\n");
             return;
         }
 
-        pthread_mutex_lock(&curr_login_table_mutex);
-        hash_node_t *logged_in_user = (hash_node_t *)hash_table_search(curr_login_table, username);
-        if (!logged_in_user)
-        {
-            send_data(client_fd, "ERR 104\r\n");
-            pthread_mutex_unlock(&curr_login_table_mutex);
-            return;
-        }
-
-        while (!hash_table_delete(curr_login_table, username))
-        {
-        }
-
-        send_data(client_fd, "OK_LOGGEDOUT\r\n");
-        pthread_mutex_unlock(&curr_login_table_mutex);
+        send_data(client_fd, "OK_SIGNEDUP\r\n");
+        pthread_mutex_unlock(&registered_table_mutex);
     }
     else if (!strcmp(service_type, "LOGIN"))
     {
 #define MAX_USERNAME_LEN 256
 #define MAX_PASS_LEN 256
-        char username[MAX_USERNAME_LEN];
-        char password[MAX_PASS_LEN];
-#undef MAX_USERNAME_LEN
-#undef MAX_PASS_LEN
+        char username[MAX_USERNAME_LEN] = {0};
+        char password[MAX_PASS_LEN] = {0};
+
+        size_t current_pos = service_len;
+        while (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
 
         size_t username_len = 0;
-        size_t current_pos = service_len + 1;
-
-        while (current_pos < len && !isspace(service[current_pos]) && username_len < sizeof(username) - 1)
+        while (current_pos < len && !isspace(service[current_pos]) && username_len < MAX_USERNAME_LEN - 1)
         {
             username[username_len++] = service[current_pos++];
         }
         username[username_len] = '\0';
 
-        if (current_pos < len && isspace(service[current_pos]))
+        while (current_pos < len && isspace(service[current_pos]))
         {
             current_pos++;
         }
 
         size_t password_len = 0;
-        while (current_pos < len && !isspace(service[current_pos]) && password_len < sizeof(password) - 1)
+        while (current_pos < len && !isspace(service[current_pos]) && password_len < MAX_PASS_LEN - 1)
         {
             password[password_len++] = service[current_pos++];
         }
@@ -159,8 +145,15 @@ void handle_service(int client_fd, char *service)
         hash_node_t *registered_user = (hash_node_t *)hash_table_search(registered_table, username);
         if (!registered_user)
         {
-            send_data(client_fd, "ERR 100\r\n");
             pthread_mutex_unlock(&registered_table_mutex);
+            send_data(client_fd, "ERR 100\r\n");
+            return;
+        }
+
+        if (strcmp(registered_user->password, password) != 0)
+        {
+            pthread_mutex_unlock(&registered_table_mutex);
+            send_data(client_fd, "ERR 102\r\n");
             return;
         }
         pthread_mutex_unlock(&registered_table_mutex);
@@ -169,81 +162,144 @@ void handle_service(int client_fd, char *service)
         hash_node_t *logged_in_user = (hash_node_t *)hash_table_search(curr_login_table, username);
         if (logged_in_user)
         {
+            pthread_mutex_unlock(&curr_login_table_mutex);
             send_data(client_fd, "ERR 101\r\n");
-            pthread_mutex_unlock(&curr_login_table_mutex);
             return;
         }
 
-        if (strcmp(registered_user->password, password) != 0)
+        if (!hash_table_insert(curr_login_table, username, password, client_fd))
         {
-            send_data(client_fd, "ERR 102\r\n");
             pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 99\r\n");
             return;
-        }
-
-        while (!hash_table_insert(curr_login_table, username, password, client_fd))
-        {
         }
 
         send_data(client_fd, "OK_LOGGEDIN\r\n");
         pthread_mutex_unlock(&curr_login_table_mutex);
     }
+    else if (!strcmp(service_type, "LOGOUT"))
+    {
+#define MAX_USERNAME_LEN 256
+        char username[MAX_USERNAME_LEN] = {0};
+
+        size_t current_pos = service_len;
+        while (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
+
+        size_t username_len = 0;
+        while (current_pos < len && !isspace(service[current_pos]) && username_len < MAX_USERNAME_LEN - 1)
+        {
+            username[username_len++] = service[current_pos++];
+        }
+        username[username_len] = '\0';
+
+        if (!username_len)
+        {
+            send_data(client_fd, "ERR 99\r\n");
+            return;
+        }
+
+        pthread_mutex_lock(&curr_login_table_mutex);
+        hash_node_t *logged_in_user = (hash_node_t *)hash_table_search(curr_login_table, username);
+        if (!logged_in_user)
+        {
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 104\r\n");
+            return;
+        }
+
+        if (!hash_table_delete(curr_login_table, username))
+        {
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 99\r\n");
+            return;
+        }
+
+        send_data(client_fd, "OK_LOGGEDOUT\r\n");
+        pthread_mutex_unlock(&curr_login_table_mutex);
+    }
     else if (!strcmp(service_type, "SEND"))
     {
 #define MAX_USERNAME_LEN 256
-        char sender[MAX_USERNAME_LEN];
-        char receiver[MAX_USERNAME_LEN];
-#undef MAX_USERNAME_LEN
+#define MAX_MESSAGE_LEN 1024
+        char sender[MAX_USERNAME_LEN] = {0};
+        char receiver[MAX_USERNAME_LEN] = {0};
+
+        size_t current_pos = service_len;
+        while (current_pos < len && isspace(service[current_pos]))
+        {
+            current_pos++;
+        }
 
         size_t sender_len = 0;
-        size_t receiver_len = 0;
-        size_t current_pos = service_len + 1;
-
-        while (current_pos < len && !isspace(service[current_pos]) && sender_len < sizeof(sender) - 1)
+        while (current_pos < len && !isspace(service[current_pos]) && sender_len < MAX_USERNAME_LEN - 1)
         {
             sender[sender_len++] = service[current_pos++];
         }
         sender[sender_len] = '\0';
 
-        if (current_pos < len && isspace(service[current_pos]))
+        while (current_pos < len && isspace(service[current_pos]))
         {
             current_pos++;
         }
 
-        while (current_pos < len && !isspace(service[current_pos]) && receiver_len < sizeof(receiver) - 1)
+        size_t receiver_len = 0;
+        while (current_pos < len && !isspace(service[current_pos]) && receiver_len < MAX_USERNAME_LEN - 1)
         {
             receiver[receiver_len++] = service[current_pos++];
         }
         receiver[receiver_len] = '\0';
 
-        if (current_pos < len && isspace(service[current_pos]))
+        if (!sender_len || !receiver_len)
+        {
+            send_data(client_fd, "ERR 99\r\n");
+            return;
+        }
+
+        while (current_pos < len && isspace(service[current_pos]))
         {
             current_pos++;
         }
 
         pthread_mutex_lock(&curr_login_table_mutex);
-
         hash_node_t *sender_node = (hash_node_t *)hash_table_search(curr_login_table, sender);
         if (!sender_node)
         {
-            send_data(client_fd, "ERR 104\r\n");
             pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 104\r\n");
             return;
         }
 
         hash_node_t *receiver_node = (hash_node_t *)hash_table_search(curr_login_table, receiver);
         if (!receiver_node)
         {
-            send_data(client_fd, "ERR 105\r\n");
             pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 105\r\n");
             return;
         }
 
-        char msg_buffer[1024];
-        snprintf(msg_buffer, sizeof(msg_buffer), "MESG %zu %s", len - current_pos, service + current_pos);
-        send_data(receiver_node->user_fd, msg_buffer);
-        send_data(client_fd, "OK_SENT\r\n");
+        size_t message_len = len - current_pos;
+        if (message_len == 0 || message_len > MAX_MESSAGE_LEN - 50)
+        { 
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 99\r\n");
+            return;
+        }
 
+        char msg_buffer[MAX_MESSAGE_LEN];
+        int written = snprintf(msg_buffer, sizeof(msg_buffer), "MESG %zu %s", message_len, service + current_pos);
+        if (written < 0 || written >= (int)sizeof(msg_buffer))
+        {
+            pthread_mutex_unlock(&curr_login_table_mutex);
+            send_data(client_fd, "ERR 99\r\n");
+            return;
+        }
+
+        send_data(receiver_node->user_fd, msg_buffer);
+
+        send_data(client_fd, "OK_SENT\r\n");
         pthread_mutex_unlock(&curr_login_table_mutex);
     }
     else
