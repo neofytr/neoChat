@@ -99,4 +99,10 @@ check if the sender is in curr login table; otherwise return ERR 104\r\n
 check if the receiver is in curr login table; otherwise return ERR 105\r\n
 send the msg to receiver (format: MESG <mesg_len> <msg>); return OK_SENT to the sender\r\n
 
+4. poll currently logged in users
+
+POLL
+
+send all the users in the curr_login_table (format USERS <username_one> <username_two> ...\r\n)
+
 */

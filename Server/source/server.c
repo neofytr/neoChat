@@ -103,6 +103,54 @@ void handle_service(int client_fd, char *service)
         send_data(client_fd, "OK_SIGNEDUP\r\n");
         pthread_mutex_unlock(&registered_table_mutex);
     }
+    else if (!strcmp(service_type, "POLL"))
+    {
+        size_t total_len = 5; // USERS
+
+        pthread_mutex_lock(&curr_login_table_mutex);
+        hash_node_t **buckets = curr_login_table->buckets;
+
+        for (size_t counter = 0; counter < NUM_BUCKETS; counter++)
+        {
+            hash_node_t *curr = buckets[counter];
+            while (curr)
+            {
+                total_len += strlen(curr->username) + 1; // +1 for space
+                curr = curr->next_node;
+            }
+        }
+
+        total_len += 3; //\r\n\0
+
+        char *buffer;
+        while (!(buffer = (char *)malloc(sizeof(char) * total_len)))
+        {
+        }
+
+        memcpy(buffer, "USERS", 5);
+        size_t current_pos = 5;
+
+        for (size_t counter = 0; counter < NUM_BUCKETS; counter++)
+        {
+            hash_node_t *curr = buckets[counter];
+            while (curr)
+            {
+                buffer[current_pos++] = ' ';
+                size_t username_len = strlen(curr->username);
+                memcpy(buffer + current_pos, curr->username, username_len);
+                current_pos += username_len;
+                curr = curr->next_node;
+            }
+        }
+
+        memcpy(buffer + current_pos, "\r\n", 2);
+        buffer[current_pos + 2] = '\0';
+
+        send_data(client_fd, buffer);
+
+        free(buffer);
+        pthread_mutex_unlock(&curr_login_table_mutex);
+    }
     else if (!strcmp(service_type, "LOGIN"))
     {
 #define MAX_USERNAME_LEN 256
