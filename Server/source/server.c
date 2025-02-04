@@ -641,7 +641,7 @@ int handle_client_data(int epoll_fd, struct epoll_event *event)
 
     while (true)
     {
-        ssize_t bytes_read = read(client_fd, read_buffer, sizeof(read_buffer) - 1);
+        ssize_t bytes_read = recv(client_fd, read_buffer, sizeof(read_buffer) - 1, 0);
 
         if (bytes_read == -1)
         {
@@ -649,9 +649,9 @@ int handle_client_data(int epoll_fd, struct epoll_event *event)
             {
                 break;
             }
-            perror("read");
+            perror("recv");
             cleanup_client_connection(epoll_fd, client_fd);
-            return -1;
+            return 0; // so that the program doesn't exit
         }
 
         if (bytes_read == 0)
